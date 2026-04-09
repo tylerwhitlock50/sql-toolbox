@@ -1,0 +1,54 @@
+check_lines
+
+'**************************************************
+
+Sub check_lines()
+
+Dim objShell
+Set objShell = CreateObject("WScript.Shell")
+Set ORDERLINES = Lines.Value
+LineCount = ORDERLINES.Count
+
+If LineCount = 0 Then Exit Sub
+
+Foundreturnpart = False
+
+For i = 0 To (LineCount - 1)
+    Set oline = ORDERLINES(i).Value
+    If InStr(1, oline("PART_ID"), "RETURN") > 0 Then
+        Foundreturnpart = True
+        Exit For
+    End If
+    Next
+    
+If Foundreturnpart Then
+ objShell.Run "https://youtu.be/2ZOIpsxfzxw?si=hutjyBxzn0DKe1Bz", 1, False
+
+
+
+' Initial prompt
+response = MsgBox("Are you sure you want to continue? This ""RETURN FOR CREDIT/RMA"" part isn't a real thing.", vbYesNo + vbCritical, "Just Checking...")
+If response = vbNo Then Exit Sub
+
+' First follow-up
+response = MsgBox("Hmm, it seems like you might not have gotten the memo. This really isn't recommended. Still want to proceed?", vbYesNo + vbQuestion, "Second Thoughts?")
+If response = vbNo Then Exit Sub
+
+' Second follow-up
+response = MsgBox("Okay, now we're entering the territory of 'I told you so'. Are you *really* sure? Like, really-really sure?", vbYesNo + vbExclamation, "Seriously?")
+If response = vbNo Then Exit Sub
+
+' Third follow-up
+response = MsgBox("We're not mad, just disappointed. But hey, if you insist on clicking things you shouldn't... Last chance to turn back!", vbYesNo + vbInformation, "Last Chance")
+If response = vbNo Then Exit Sub
+
+' Final message
+MsgBox "Well, you've made it this far. Not sure if you should be proud or not. Brace yourself for the consequences.", vbOKOnly + vbCritical, "Here Goes Nothing..."
+' Potentially execute the discouraged action here or just let them off with a warning
+
+
+End If
+
+
+
+End Sub
