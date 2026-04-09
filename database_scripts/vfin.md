@@ -857,6 +857,76 @@ Status/disposition lookup (Open, Approved, Rejected, Posted, Void, etc.).
 
 ---
 
+---
+
+## 6. GL Posting Architecture (Cross-Database)
+
+### How Postings Flow Between VECA and VFIN
+
+VECA (manufacturing ERP) and VFIN (financial accounting) share a single chart of accounts but post GL entries through separate distribution table systems with different structures.
+
+**VECA dist tables** store manufacturing/operational postings (WIP, shipments, inventory, purchasing). These use:
+- Single `AMOUNT` column + `AMOUNT_TYPE` ('DR'/'CR')
+- `GL_ACCOUNT_ID` for the account
+- `POSTING_STATUS` ('U'=Unposted, 'P'=Posted)
+- `BATCH_ID` linking to JOURNAL_BATCH for posting control
+- `SITE_ID` for multi-site scoping
+
+**VFIN dist tables** store financial postings (AR invoices, AP invoices, payments, journal entries). These use:
+- Separate `DEBIT_AMOUNT` / `CREDIT_AMOUNT` columns
+- `ACCOUNT_ID` for the account
+- No explicit posting status (existence implies posted)
+- `ENTITY_ID` for multi-entity scoping
+
+**The bridge: LEDGER_DIRECT_JOURNAL.** When VECA journal batches are posted to Visual Financials, they create LEDGER_DIRECT_JOURNAL entries in VFIN. This is the mechanism by which VECA operational postings appear in VFIN's general ledger. The DIRECT_JOURNAL entries are summarized versions of the VECA detail.
+
+### Distribution Tables by Volume
+
+| DB | Table | Row Count | Source Document |
+|---|---|---|---|
+| VECA | WIP_ISSUE_DIST | ~7.2M | Work orders (material/labor/burden issues) |
+| VECA | WIP_RECEIPT_DIST | ~6.2M | Work orders (finished goods receipts) |
+| VECA | SHIPMENT_DIST | ~1.3M | Customer orders (COGS on shipment) |
+| VFIN | RECEIVABLES_RECEIVABLE_DIST | ~552K | AR invoices |
+| VECA | RECEIVABLE_DIST | ~536K | AR invoices (VECA side) |
+| VFIN | CASHMGMT_PAYMENT_DIST | ~529K | Payments (receipts + disbursements) |
+| VFIN | PAYABLES_PAYABLE_DIST | ~234K | AP invoices |
+| VECA | PURCHASE_DIST | ~192K | Purchase orders (receipt accruals) |
+| VFIN | LEDGER_GEN_JOURN_DIST | ~179K | General journal entries |
+| VECA | ADJUSTMENT_DIST | ~131K | Inventory adjustments |
+| VFIN | CASHMGMT_BANK_ADJ_DIST | ~13K | Bank adjustments |
+| VECA | INDIRECT_DIST | ~3.9K | Indirect cost transactions |
+| VFIN | LEDGER_DIRECT_JOURN_DIST | ~172 | System-generated (VECA batch posts) |
+| VECA | GJ_DIST | ~108 | General journal entries |
+
+**Excluded:** INV_TRANS_DIST (~15M rows) and INV_RECEIPT_DIST (~127K rows) track cost/qty distributions, not GL debit/credit postings.
+
+### Key Views
+
+- **VFIN `LEDGER_ALL_DISTRIBUTIONS`** - Built-in view unioning all 6 VFIN dist tables with a JOURNAL_TYPE discriminator ('GEN', 'PAYB', 'RECV', 'PAYMENT', 'BANKADJ', 'DIRECT'). Joins to parent header tables for REFERENCE and DOCUMENT_TYPE_ID.
+- **VFIN `LEDGER_RECV_DISTRIBUTIONS`** - Receivables-focused view with customer context
+- **VFIN `LEDGER_PAYB_DISTRIBUTIONS`** - Payables-focused view with supplier context
+
+### Account Classification
+
+`VECA.dbo.Z_GL_MAPPING` is a custom table that classifies GL accounts for financial reporting:
+- `FS` - Financial statement (BS or IS)
+- `FS_CAT` - Statement category (e.g., "Revenue", "Accrued Expenses")
+- `FS_DET` - Detail category
+- `CATEGORY` - Reporting category
+- `CC_CAT` - Cost center category
+- `BREAK_CAT` - Breakout category
+- `EFFECTIVE_START_DATE` / `EFFECTIVE_END_DATE` - Date-effective account classification
+
+### Consolidated Queries
+
+See `queries/` directory:
+- **`gl_posting_map.sql`** - Master union of all dist tables across both databases, normalized to common columns
+- **`gl_posting_map_enriched.sql`** - Same plus Z_GL_MAPPING account classification
+- **`gl_posting_today.sql`** - Daily audit: summary by type, balance check, and detail with account classification
+
+---
+
 ## Common Patterns
 
 - **Document flow (AR):** Customer Order -> Shipper -> Receivable (Invoice). Recurring templates generate receivables on a schedule.
