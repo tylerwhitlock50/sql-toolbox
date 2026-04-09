@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__d48e62b3-086f-4d50-829d-6923df6805cf__list_tables",
+      "Bash(iconv -f UTF-16LE -t UTF-8 \"C:\\\\Users\\\\TylerW\\\\sql-toolbox\\\\database_scripts\\\\veca\\\\dbo.PURCHASE_ORDER.Table.sql\")",
+      "Bash(xargs grep:*)",
+      "Bash(iconv -f UTF-16LE -t UTF-8 \"C:\\\\Users\\\\TylerW\\\\sql-toolbox\\\\database_scripts\\\\veca\\\\dbo.PURC_ORDER_LINE.Table.sql\")",
+      "Bash(iconv -f UTF-16LE -t UTF-8 \"C:\\\\Users\\\\TylerW\\\\sql-toolbox\\\\database_scripts\\\\veca\\\\dbo.PURC_LINE_DEL.Table.sql\")",
+      "Bash(ls -1 \"C:\\\\Users\\\\TylerW\\\\sql-toolbox\\\\database_scripts\\\\veca\\\\dbo.PURC\"*.sql)"
+    ]
+  }
+}
