@@ -1,0 +1,129 @@
+path,bytes,dbs,writes,write_flag,tables,domain,has_go
+old-queries/Queries/Trial Balance for 2021.sql,2773,VFIN,,False,VFIN.dbo.LEDGER_ACCOUNT;VFIN.dbo.LEDGER_ACCOUNT_BALANCE,accounting_vfin,False
+old-queries/Queries/VFIN Payable Posting Corrections.sql,8521,VFIN,UPDATE,True,vfin.dbo.payables_payable_dist;vfin.dbo.ledger_account_balance;vfin.dbo.ledger_account;vfin.dbo.receivables_receivable_dist,accounting_vfin,False
+old-queries/it queries/Admin-Find Foreign Key References.sql,349,VECA,,False,sys.foreign_keys;sys.foreign_key_columns;sys.tables,admin_dba,False
+old-queries/it queries/Admin-Lookup Space usage by DB.sql,499,,,False,SYS.DATABASE_FILES;SYS.MASTER_FILES,admin_dba,False
+old-queries/it queries/Check Index Fragmentation.sql,179,,,False,sys.fulltext_index_fragments,admin_dba,False
+old-queries/it queries/Grant Select to DB.sql,163,VFIN,,False,,admin_dba,False
+old-queries/it queries/Grant Select Update Insert Delete to Table for User.sql,76,VFIN,DELETE;INSERT;UPDATE,True,,admin_dba,False
+old-queries/it queries/Restore Backup Query.sql,706,VECA;VFIN,ALTER,True,DISK,admin_dba,True
+old-queries/it queries/sqlserver index rebuild.new (1).sql,2331,,ALTER;DROP,True,sys.dm_db_index_physical_stats;partitions;sys.objects;sys.schemas;sys.indexes;sys.partitions,admin_dba,True
+old-queries/Queries/Labor By Day Estimated.sql,2032,,,False,vta.dbo.labor_time_entry;vta.dbo.labor_time_card;VTA].[dbo].[LABOR_EMPLOYEE_DEPARTMENT;dbo].[LABOR_EMPLOYEE_PAY_RATE,labor_timecards,False
+old-queries/it queries/Costing Utilities - Labor Ticket Check.sql,2007,VECA,,False,LABOR_TICKET;OPERATION,labor_timecards,False
+old-queries/it queries/Get Labor Time Clocks.sql,2020,,,False,VTA.dbo.LABOR_TIME_ENTRY;VTA.dbo.LABOR_TIME_ENTRY_BREAK;labor_time_card;labor_employee;VTA.dbo.LABOR_TIME_CARD,labor_timecards,False
+old-queries/it queries/Get Labor Timecard Information.sql,3218,,,False,VTA.dbo.LABOR_EMPLOYEE;VTA.dbo.LABOR_TIME_CARD;VTA.dbo.LABOR_TIME_ENTRY;vta.dbo.labor_employee_pay_rate;VTA.dbo.LABOR_TIME_ENTRY_BREAK,labor_timecards,False
+old-queries/it queries/Lookup VTA Timecards.sql,741,,,False,VTA].[dbo].[LABOR_TIME_ENTRY;LABOR_TIME_CARD;labor_employee;labor_time_entry,labor_timecards,False
+old-queries/Queries/2022.02.11 - 7CARMS - Forecast and Usage.sql,720,VECA,,False,VECA.dbo.PLANNED_MATL_REQ;veca.dbo.inventory_trans,other,False
+old-queries/Queries/ATS Report.sql,927,VECA,,False,VECA.dbo.CUST_ORDER_LINE;VECA.dbo.CUSTOMER_ORDER;VECA.dbo.CUSTOMER_ENTITY;VECA.dbo.PART_LOCATION,other,False
+old-queries/Queries/GL Posting Level Detail.sql,3055,VECA;VFIN,,False,VFIN.dbo.PAYABLES_PAYABLE_DIST;VFIN.dbo.RECEIVABLES_RECEIVABLE_DIST;VFIN.dbo.CASHMGMT_BANK_ADJ_DIST;VFIN.dbo.CASHMGMT_PAYMENT_DIST;VFIN.dbo.LEDGER_GEN_JOURN_DIST;VFIN.dbo.LEDGER_DIRECT_JOURN_DIST;VECA.dbo.Z_GL_MAPPING,other,False
+old-queries/Queries/GL Summary Detail.sql,1004,VECA;VFIN,,False,VFIN.dbo.LEDGER_ACCOUNT_BALANCE;VECA.dbo.Z_GL_MAPPING;VFIN.dbo.LEDGER_ACCOUNT,other,False
+old-queries/Queries/Historical Backlog Query.sql,1884,VECA,,False,VECA.dbo.CUST_ORDER_LINE;VECA.dbo.CUSTOMER_ORDER,other,False
+old-queries/Queries/Note and Spec Fields.sql,1638,VECA,,False,VECA.dbo.PURC_LINE_BINARY;VECA.dbo.PURC_ORDER_BINARY;VECA.dbo.NOTATION;VECA.DBO.Customer_Binary;VECA.dbo.cust_order_binary,other,False
+old-queries/Queries/Open Order Mailings/SQL/Mailing Customer IDs.sql,198,VECA,,False,VECA.dbo.CUST_CONT_EML_DOC,other,False
+old-queries/Queries/Open Order Mailings/SQL/Open Order Report for Mailings.sql,1960,VECA,,False,VECA.dbo.CUSTOMER_ORDER;VECA.dbo.CUST_ORDER_LINE;VECA.dbo.CUST_LINE_DEL,other,False
+old-queries/Queries/Open Order Report for Mailings.sql,1960,VECA,,False,VECA.dbo.CUSTOMER_ORDER;VECA.dbo.CUST_ORDER_LINE;VECA.dbo.CUST_LINE_DEL,other,False
+old-queries/Queries/Open Orders 2022.03.31.sql,985,VECA,,False,VECA.dbo.CUSTOMER_ORDER;VECA.dbo.CUST_ORDER_LINE;VECA.dbo.CUST_LINE_DEL,other,False
+old-queries/Queries/Open Orders.sql,1637,VECA,,False,VECA.dbo.CUSTOMER_ORDER;VECA.dbo.CUST_ORDER_LINE;VECA.dbo.CUST_LINE_DEL,other,False
+old-queries/Queries/POV Baseline Queries.sql,1525,VECA,,False,VECA.dbo.INVENTORY_TRANS,other,False
+old-queries/Queries/Top 10 Products by Family.sql,1240,VECA,,False,VECA.dbo.CUST_ORDER_LINE;VECA.dbo.USER_DEF_FIELDS,other,False
+old-queries/Queries/Top 25 FFT Products for Canada.sql,1466,VECA,,False,VECA.dbo.CUST_ORDER_LINE;VECA.dbo.USER_DEF_FIELDS,other,False
+old-queries/Queries/lastMileOrderUpdate.sql,1263,VECA,,False,VECA.dbo.CUSTOMER_ORDER;VECA.dbo.USER_DEF_FIELDS,other,True
+old-queries/Queries/unbalancesInvoices.sql,1083,VFIN,,False,vfin.dbo.payables_payable_dist,other,False
+old-queries/Queries/updated hourly rates.sql,445,,,False,VTA.dbo.LABOR_EMPLOYEE_DEPARTMENT,other,False
+old-queries/it queries/ATF App Join Expected vs Counted Tables.sql,184,VECA,,False,VECA].[dbo].[ATF_SN;VECA].[dbo].ATF_CNT_TBL,other,False
+old-queries/it queries/Customer notes lookup query.sql,403,VECA,,False,VECA].[dbo].[NOTATION;notation,other,False
+old-queries/it queries/EBBOpenAcquisitions.sql,640,,,False,"TDJ;""TEST_DB_CHRISTENSEN$Easy;""Christensen_Arms$Easy",other,False
+old-queries/it queries/EBB_ATF_Serial_Lookup.sql,175,,,False,BC15,other,False
+old-queries/it queries/Get Active Employee Emails.sql,597,,,False,VTA.dbo.LABOR_EMPLOYEE,other,False
+old-queries/it queries/Get User Infor Access Levels.sql,2345,VECA,,False,user_profile;application_user;vta.dbo.labor_employee;USER_FLD_AUTHORITY;USER_MNU_AUTHORITY;USER_PGM_AUTHORITY,other,False
+old-queries/it queries/Get notes from customer order (convert bits to varchar).sql,234,VECA,,False,VECA].[dbo].[CUST_order_BINARY,other,False
+old-queries/it queries/Infor Profile Lookup.sql,1395,VECA,,False,user_profile;application_user;vta.dbo.labor_employee;USER_FLD_AUTHORITY;USER_MNU_AUTHORITY;USER_PGM_AUTHORITY,other,False
+old-queries/it queries/KioskUsersActive.sql,2390,,,False,LSA.dbo.LSA_LOGINS;VTA.dbo.SHARED_CONFIG_KIOSK,other,False
+old-queries/it queries/Lookup PL info and tracking.sql,360,,,False,USER_DEF_FIELDS;Z_UPS_SHIPMENTS,other,False
+old-queries/it queries/Lookup Packlist with tracking (PLFixer).sql,455,VECA,,False,VECA.dbo.USER_DEF_FIELDS,other,False
+old-queries/it queries/Lookup Trace by Customer ID.sql,282,VECA,,False,customer_order;Inventory_trans;trace_inv_trans,other,False
+old-queries/it queries/SN Upload Cleanup by Trace_rank.sql,323,VECA,,False,VECA].[dbo].[_SN_UPLOAD,other,False
+old-queries/it queries/Safety Stock Bulk Update Example.sql,4586,,,False,,other,False
+old-queries/it queries/Serial Numbers/FindGunInfoBySerialNumber.sql,1214,,,False,inventory_trans;trace_inv_trans;USER_DEF_FIELDS,other,False
+old-queries/Queries/By Pass Email Script.sql,2878,VECA,UPDATE,True,,other,False
+old-queries/it queries/0aVmfg.sql,2223,VECA,DELETE,True,DBO.LOGINS,other,False
+old-queries/it queries/ATF App Queries.sql,1161,VECA,DELETE;DROP,True,ATF_SN;ATF_CNT_TBL;VECA].[dbo].[ATF_CNT_TBL;ATF_AUDIT_PERIOD;inventory_trans;LOCATION,other,False
+old-queries/it queries/ComponentsProject/RACKSHELFBIN.sql,2411,,INSERT,True,sys.all_objects;N;Shelves;Bins;ToInsert;LOCATION,other,False
+old-queries/it queries/Entrust Query.sql,21711,,CREATE;INSERT,True,sys.dm_exec_query_stats;ESI_CORE].[ESI_GLOBAL;ESI_CORE].[v_ERP_INVOICE_HEADER_TEST;ESI_EDI].[ESI_DASH_HEADER_INVOICE;ESI_EDI].[ESI_DASH_HEADER;ESI_CORE].[ESI_CUSTOMER;ESI_CORE].[ESI_CUSTOMER_DOCUMENT_TYPE;ESI_CORE].[ESI_DOCUMENT_TYPE;ESI_CORE].[v_ERP_INVOICE_HEADER_PLAY;ESI_CORE].[v_ERP_INVOICE_HEADER,other,False
+old-queries/it queries/Update Receiver-GL Mapping information.sql,628,,UPDATE,True,receivable;receivable_line;cust_order_line;customer,other,False
+old-queries/Queries/Employee Department Up to date.sql,946,,,False,VTA.dbo.LABOR_EMPLOYEE_DEPARTMENT;VTA.dbo.LABOR_EMPLOYEE_PAY_RATE,parts_inventory,False
+old-queries/Queries/Inventory Location and Value.sql,27334,VECA,,False,VECA.dbo.INVENTORY_TRANS;VECA.dbo.PART_LOCATION;VECA.dbo.part,parts_inventory,False
+old-queries/Queries/Inventory Turns.sql,1530,VECA,,False,veca.dbo.part;VECA.dbo.INVENTORY_TRANS,parts_inventory,False
+old-queries/Queries/Labor By Department Estimate.sql,3916,VECA,,False,vta.dbo.labor_time_entry;vta.dbo.labor_time_card;VTA].[dbo].[LABOR_EMPLOYEE_DEPARTMENT;vta.[dbo].[LABOR_EMPLOYEE_PAY_RATE;VECA.dbo.OPERATION,parts_inventory,False
+old-queries/Queries/LastMileOrderCollection.sql,2951,VECA,,False,VECA.dbo.CUST_ORDER_LINE;VECA.dbo.CUSTOMER_ORDER;veca.dbo.customer;veca.dbo.cust_address;veca.dbo.part;VECA.dbo.USER_DEF_FIELDS,parts_inventory,True
+old-queries/Queries/Order Forecast Query.sql,3061,VECA,,False,VECA.dbo.CUSTOMER_ORDER;VECA.dbo.CUST_ORDER_LINE;VECA.dbo.CUSTOMER_CARMS;VECA.dbo.PART,parts_inventory,False
+old-queries/Queries/Part User Defined Fields.sql,3095,VECA,,False,VECA.dbo.PART;VECA.dbo.USER_DEF_FIELDS,parts_inventory,False
+old-queries/Queries/Redeptions by Part.sql,553,VECA,,False,VECA.dbo.CUST_ORDER_LINE,parts_inventory,False
+old-queries/Queries/SerialNumberDetail.sql,3778,VECA,,False,VECA].[dbo].[TRACE_INV_TRANS;veca.dbo.inventory_trans;VECA.dbo.PART;VECA.dbo.USER_DEF_FIELDS,parts_inventory,False
+old-queries/it queries/ComponentsProject/CompInventory.sql,928,,,False,dbo.PART_LOCATION;loc_totals;wh_totals;dbo.PART,parts_inventory,False
+old-queries/it queries/ComponentsProject/PARTLOCLOOKUP.sql,512,,,False,PART_LOCATION;PART,parts_inventory,False
+old-queries/it queries/Find picklist orders available.sql,1727,VECA,,False,veca.dbo.customer_order;veca.dbo.cust_order_line;veca.dbo.part;veca.dbo.customer_entity;veca.dbo.demand_supply_link,parts_inventory,False
+old-queries/it queries/Get Open Order Line Detail.sql,2136,VECA,,False,VECA.dbo.CUSTOMER_ORDER;VECA.dbo.CUST_ORDER_LINE;VECA.dbo.CUSTOMER;VECA.dbo.CUSTOMER_ENTITY;VECA.dbo.PART;VECA.dbo.CUSTOMER_CARMS;VECA.dbo.CUST_ADDRESS;INVENTORY_TRANS,parts_inventory,False
+old-queries/it queries/Get requirements and quantities by part.sql,1170,VECA,,False,REQUIREMENT;PART_SITE;PART;PART_LOCATION,parts_inventory,False
+old-queries/it queries/Lookup Part Requirements by engineering master.sql,242,,,False,REQUIREMENT;PART_SITE,parts_inventory,False
+old-queries/it queries/More Trace Lookups.sql,839,VECA,,False,VECA].[dbo].[TRACE_INV_TRANS;part;trace,parts_inventory,False
+old-queries/it queries/Open order parts vs available-buildable-open quantities.sql,4900,VECA,,False,cust_order_line;customer_order;customer_entity;REQUIREMENT;PART_LOCATION;part,parts_inventory,False
+old-queries/it queries/Part Trace Lookup with QTY and Part Info.sql,1734,VECA,,False,VECA].[dbo].PART;TRACE_INV_TRANS;PART_LOCATION;dbo.TRACE_INV_TRANS;dbo.PART,parts_inventory,False
+old-queries/it queries/Part User Defined Fields.sql,3074,VECA,,False,VECA.dbo.PART;VECA.dbo.USER_DEF_FIELDS,parts_inventory,False
+old-queries/it queries/Test Query for non picklst orders.sql,3550,VECA,,False,veca.dbo.customer_order;veca.dbo.cust_order_line;veca.dbo.part;veca.dbo.customer_entity;veca.dbo.demand_supply_link;t2;t1,parts_inventory,False
+old-queries/it queries/Update order policies for bulk changes to MRP.sql,343,VECA,,False,part;part_location;warehouse_locati,parts_inventory,False
+old-queries/it queries/Verify Match between trace-inventory-part_location quantities.sql,1219,,,False,INVENTORY_TRANS;TRACE_INV_TRANS;part_location;pq;i;t,parts_inventory,False
+old-queries/it queries/0gBadAdjs.sql,1058,VECA,UPDATE,True,INVENTORY_TRANS;PART,parts_inventory,False
+old-queries/it queries/ComponentsProject/PARTLOCDELETE.sql,196,,DELETE,True,PART_LOCATION,parts_inventory,False
+old-queries/it queries/Update Order Policy Bulk Change (2021).sql,68170,,UPDATE,True,PART,parts_inventory,False
+old-queries/it queries/Sales/EDI/UpdateCustAddressfromFile.sql,605,,CREATE;DROP;INSERT;UPDATE,True,'\\2CARMS\CARMS$\CA;CUST_ADDRESS;test2.dbo.cust_address,sales_edi,False
+old-queries/Queries/2022 Orders and Shipments (Kort Request).sql,1191,VECA,,False,VECA.dbo.CUST_ORDER_LINE;veca.dbo.part,shipping,False
+old-queries/Queries/2022.01.25 - Customer Scorecard Completed.sql,6438,VECA;VFIN,,False,VECA.dbo.Customer;VECA.dbo.CUSTOMER_ORDER;Vfin.dbo.RECEIVABLES_RECEIVABLE;veca.dbo.shipper;veca.dbo.shipper_line;veca.dbo.inventory_trans,shipping,False
+old-queries/Queries/2022.01.25 - Open Orders.sql,9881,VECA;VFIN,,False,VECA.dbo.CUSTOMER_ORDER;VECA.dbo.CUST_ORDER_LINE;VECA.dbo.CUST_LINE_DEL;VECA.dbo.Customer;Vfin.dbo.RECEIVABLES_RECEIVABLE;veca.dbo.shipper;veca.dbo.shipper_line;veca.dbo.inventory_trans;veca.dbo.part,shipping,False
+old-queries/Queries/2022.01.25 - Order Scores Selection.sql,10386,VECA;VFIN,,False,VECA.dbo.CUSTOMER_ORDER;VECA.dbo.CUST_ORDER_LINE;VECA.dbo.CUST_LINE_DEL;VECA.dbo.Customer;Vfin.dbo.RECEIVABLES_RECEIVABLE;veca.dbo.shipper;veca.dbo.shipper_line;veca.dbo.inventory_trans;veca.dbo.part,shipping,False
+old-queries/Queries/2022.02.22 - Picklist SQL.sql,11234,VECA;VFIN,,False,VECA.dbo.CUSTOMER_ORDER;VECA.dbo.CUST_ORDER_LINE;VECA.dbo.CUST_LINE_DEL;VECA.dbo.Customer;Vfin.dbo.RECEIVABLES_RECEIVABLE;veca.dbo.shipper;veca.dbo.shipper_line;veca.dbo.inventory_trans;veca.dbo.part;VECA.dbo.CUST_ADDRESS,shipping,False
+old-queries/Queries/2022.02.23 - Picklist Updated SQL.sql,11431,VECA;VFIN,,False,VECA.dbo.CUSTOMER_ORDER;VECA.dbo.CUST_ORDER_LINE;VECA.dbo.CUST_LINE_DEL;VECA.dbo.Customer;Vfin.dbo.RECEIVABLES_RECEIVABLE;veca.dbo.shipper;veca.dbo.shipper_line;veca.dbo.inventory_trans;veca.dbo.part;VECA.dbo.CUST_ADDRESS,shipping,False
+old-queries/Queries/2022.03.14 - Tableau Shipping Dashboard V2.sql,11890,VECA;VFIN,,False,VECA.dbo.CUSTOMER_ORDER;VECA.dbo.CUST_ORDER_LINE;VECA.dbo.CUST_LINE_DEL;VECA.dbo.Customer;Vfin.dbo.RECEIVABLES_RECEIVABLE;veca.dbo.shipper;veca.dbo.shipper_line;veca.dbo.inventory_trans;veca.dbo.part;VECA.dbo.CUST_ADDRESS,shipping,False
+old-queries/Queries/Customer Scorecard Completed.sql,4898,VECA;VFIN,,False,VECA.dbo.Customer;VECA.dbo.CUSTOMER_ORDER;Vfin.dbo.RECEIVABLES_RECEIVABLE;veca.dbo.shipper;veca.dbo.shipper_line;veca.dbo.inventory_trans,shipping,False
+old-queries/Queries/Customer Scorecard.sql,4897,VECA;VFIN,,False,VECA.dbo.Customer;VECA.dbo.CUSTOMER_ORDER;Vfin.dbo.RECEIVABLES_RECEIVABLE;veca.dbo.shipper;veca.dbo.shipper_line;veca.dbo.inventory_trans,shipping,False
+old-queries/Queries/Gross Margin Comparison Structure.sql,4716,VECA,,False,veca.dbo.shipper_Line;veca.dbo.cust_order_line;veca.dbo.shipper;VECA.dbo.INVENTORY_TRANS;veca.dbo.product,shipping,False
+old-queries/Queries/SHIPPING ALGORITHIM TESTING.sql,11859,VECA;VFIN,,False,VECA.dbo.CUSTOMER_ORDER;VECA.dbo.CUST_ORDER_LINE;VECA.dbo.CUST_LINE_DEL;VECA.dbo.Customer;Vfin.dbo.RECEIVABLES_RECEIVABLE;veca.dbo.shipper;veca.dbo.shipper_line;veca.dbo.inventory_trans;veca.dbo.part;VECA.dbo.CUST_ADDRESS;veca.dbo.customer_entity;VECA.dbo.PART_LOCATION,shipping,False
+old-queries/Queries/Tracking Number Lookup.sql,1622,VECA;VFIN,,False,veca.dbo.user_def_fields;VECA.dbo.customer_order;VECA.dbo.shipper;VFIN.dbo.RECEIVABLES_RECEIVABLE;VECA.dbo.cust_address;VECA.dbo.CUSTOMER,shipping,False
+old-queries/it queries/0ePacklist.sql,3000,VECA,,False,shipper;customer_order;LOCATION;part_location;part,shipping,False
+old-queries/it queries/0eXchg.sql,2115,VECA;VFIN,,False,VECA.dbo.CUSTOMER;VFIN.dbo.RECEIVABLES_CUSTOMER;VECA.dbo.CUSTOMER_ORDER;VFIN.dbo.RECEIVABLES_CUSTOMER_ORDER;VECA.dbo.SHIPPER;VFIN.dbo.RECEIVABLES_SHIPPER;VECA.dbo.RECEIVABLE;VFIN.dbo.RECEIVABLES_RECEIVABLE;VECA.dbo.VENDOR;VFIN.dbo.PAYABLES_SUPPLIER;VECA.dbo.PURCHASE_ORDER;VFIN.dbo.PAYABLES_PURCHASE_ORDER;VECA.dbo.RECEIVER;VFIN.dbo.PAYABLES_RECEIVER,shipping,False
+old-queries/it queries/Get Sales Tax Group and Shipper Line by Packlist.sql,135,VECA,,False,SHIPPER_LINE,shipping,False
+old-queries/it queries/SN Upload Update List.sql,1148,VECA,,False,_SN_UPLOAD;SHIPPER;SHIPPER_LINE;TRACE_INV_TRANS;PART,shipping,False
+old-queries/it queries/Shipping/AllocableQtyQuery.sql,8040,,,False,CUSTOMER_ORDER;CUST_ORDER_LINE;IRP_DELIVERY_SCHEDULE_LINE_SHIP_DATE;VS_TRACE_LOCATION_QTY;CY_FULFILLMENT;OpenOrders;Stock;Allocations;SHIPPER_LINE;SHIPPER;ShippedQty;Fulfilled;CUSTOMER_ENTITY;CUSTOMER_SITE,shipping,False
+old-queries/it queries/Show all shipped serial numbers and product codes.sql,299,VECA,,False,SHIPPER;SHIPPER_LINE;TRACE_INV_TRANS;PART,shipping,False
+old-queries/it queries/SN UPload Update Produc Codes.sql,1674,VECA,UPDATE,True,SHIPPER;SHIPPER_LINE;TRACE_INV_TRANS;PART;_SN_UPLOAD,shipping,False
+old-queries/it queries/ViewsJoel/v_DASH_HEADER_INVOICE.sql,6165,VECA,CREATE,True,3CARMS\CAPROD].[VECA].[dbo].[RECEIVABLE;ESI_CORE].[ESI_CUSTOMER;ESI_CORE].[ESI_TRADING_PARTNER;ESI_CORE].[ESI_CUSTOMER_GROUP;3CARMS\CAPROD].[VECA].[dbo].[SHIPPER;3CARMS\CAPROD].[VECA].[dbo].[CUSTOMER_ORDER;3CARMS\CAPROD].[VECA].[dbo].[RECEIVABLE_LINE;3CARMS\CAPROD].[VECA].[dbo].[SALES_TAX;3CARMS\CAPROD].[VECA].[dbo].[SITE,shipping,True
+old-queries/it queries/ViewsJoel/v_DASH_HEADER_INVOICE_PLAY.sql,6175,VECA,CREATE,True,6CARMS\CAPROD].[VECA].[dbo].[RECEIVABLE;ESI_CORE].[ESI_CUSTOMER;ESI_CORE].[ESI_TRADING_PARTNER;ESI_CORE].[ESI_CUSTOMER_GROUP;6CARMS\CAPROD].[VECA].[dbo].[SHIPPER;6CARMS\CAPROD].[VECA].[dbo].[CUSTOMER_ORDER;6CARMS\CAPROD].[VECA].[dbo].[RECEIVABLE_LINE;6CARMS\CAPROD].[VECA].[dbo].[SALES_TAX;6CARMS\CAPROD].[VECA].[dbo].[SITE,shipping,True
+old-queries/it queries/ViewsJoel/v_DASH_HEADER_INVOICE_TEST.sql,6175,VECA,CREATE,True,6CARMS\CAPROD].[VECA].[dbo].[RECEIVABLE;ESI_CORE].[ESI_CUSTOMER;ESI_CORE].[ESI_TRADING_PARTNER;ESI_CORE].[ESI_CUSTOMER_GROUP;6CARMS\CAPROD].[VECA].[dbo].[SHIPPER;6CARMS\CAPROD].[VECA].[dbo].[CUSTOMER_ORDER;6CARMS\CAPROD].[VECA].[dbo].[RECEIVABLE_LINE;6CARMS\CAPROD].[VECA].[dbo].[SALES_TAX;6CARMS\CAPROD].[VECA].[dbo].[SITE,shipping,True
+old-queries/it queries/ViewsJoel/v_DASH_LINE_INVOICE.sql,5987,VECA,CREATE,True,3CARMS\CAPROD].[VECA].[dbo].[RECEIVABLE_LINE;3CARMS\CAPROD].[VECA].[dbo].[RECEIVABLE;3CARMS\CAPROD].[VECA].[dbo].[SHIPPER_LINE;3CARMS\CAPROD].[VECA].[dbo].[SHIPPER;3CARMS\CAPROD].[VECA].[dbo].[CUSTOMER_ORDER;3CARMS\CAPROD].[VECA].[dbo].[CUST_ORDER_LINE;3CARMS\CAPROD].[VECA].[dbo].[PART;3CARMS\CAPROD].[VECA].[dbo].[SITE;3CARMS\CAPROD].[VECA].[dbo].[SALES_TAX,shipping,True
+old-queries/it queries/ViewsJoel/v_DASH_LINE_INVOICE_PLAY.sql,5997,VECA,CREATE,True,6CARMS\CAPROD].[VECA].[dbo].[RECEIVABLE_LINE;6CARMS\CAPROD].[VECA].[dbo].[RECEIVABLE;6CARMS\CAPROD].[VECA].[dbo].[SHIPPER_LINE;6CARMS\CAPROD].[VECA].[dbo].[SHIPPER;6CARMS\CAPROD].[VECA].[dbo].[CUSTOMER_ORDER;6CARMS\CAPROD].[VECA].[dbo].[CUST_ORDER_LINE;6CARMS\CAPROD].[VECA].[dbo].[PART;6CARMS\CAPROD].[VECA].[dbo].[SITE;6CARMS\CAPROD].[VECA].[dbo].[SALES_TAX,shipping,True
+old-queries/it queries/ViewsJoel/v_DASH_LINE_INVOICE_TEST.sql,5997,VECA,CREATE,True,6CARMS\CAPROD].[VECA].[dbo].[RECEIVABLE_LINE;6CARMS\CAPROD].[VECA].[dbo].[RECEIVABLE;6CARMS\CAPROD].[VECA].[dbo].[SHIPPER_LINE;6CARMS\CAPROD].[VECA].[dbo].[SHIPPER;6CARMS\CAPROD].[VECA].[dbo].[CUSTOMER_ORDER;6CARMS\CAPROD].[VECA].[dbo].[CUST_ORDER_LINE;6CARMS\CAPROD].[VECA].[dbo].[PART;6CARMS\CAPROD].[VECA].[dbo].[SITE;6CARMS\CAPROD].[VECA].[dbo].[SALES_TAX,shipping,True
+old-queries/Queries/2022.03.14 - Tableau Shipping Dashboard.sql,437,VECA,,False,VECA.dbo.PART;veca.dbo.work_order,work_orders,False
+old-queries/Queries/Material Planning Window Recalculation.sql,4522,VECA,,False,VECA.dbo.PURCHASE_ORDER;VECA.dbo.PURC_ORDER_LINE;VECA.dbo.PURC_LINE_DEL;VECA.dbo.PLANNED_MATL_REQ;VECA.dbo.PLANNED_ORDER;VECA.dbo.REQUIREMENT;VECA.dbo.PART;VECA.dbo.CUSTOMER_ORDER;VECA.dbo.CUST_ORDER_LINE;VECA.dbo.CUST_LINE_DEL;VECA.dbo.WORK_ORDER;veca.dbo.master_schedule,work_orders,False
+old-queries/it queries/Basic Workorder Lookup.sql,301,VECA,,False,work_order;operation;requirement;inventory_Trans,work_orders,False
+old-queries/it queries/Cancel specific work orders-requirements-operations.sql,27229,VECA,,False,work_order;requirement,work_orders,False
+old-queries/it queries/Find list of closed work orders where close date null.sql,747,VECA,,False,work_order;inventory_trans,work_orders,False
+old-queries/it queries/Get Average and Total costs of parts by part.sql,8769,VECA,,False,work_order;part,work_orders,False
+old-queries/it queries/Get WIP-Open Orders-Available quantity queries by part.sql,1920,VECA,,False,cust_order_line;customer_order;customer_entity;part;work_order;veca.dbo.inventory_trans;part_location;inventory_trans;trace_inv_Trans,work_orders,False
+old-queries/it queries/Get Workorder Issued and calc qty.sql,315,VECA,,False,work_order;requirement,work_orders,False
+old-queries/it queries/Get qty of parts on open orders.sql,1073,VECA,,False,work_order;cust_order_line;customer_order;customer_entity,work_orders,False
+old-queries/it queries/Lookup Duplicate Transactions by SN.sql,1828,VECA,,False,trace_inv_trans;INVENTORY_TRANS;part;work_order,work_orders,False
+old-queries/it queries/Lookup Workorder Information Operation-Requirement-Labor Transaction.sql,1692,VECA,,False,OPERATION;OPERATION_BINARY;REQUIREMENT;PART;LABOR_TICKET;work_order,work_orders,False
+old-queries/it queries/MRP Recreation Runner.sql,4554,VECA,,False,VECA.dbo.PURCHASE_ORDER;VECA.dbo.PURC_ORDER_LINE;VECA.dbo.PURC_LINE_DEL;VECA.dbo.PLANNED_MATL_REQ;VECA.dbo.PLANNED_ORDER;VECA.dbo.REQUIREMENT;VECA.dbo.PART;VECA.dbo.CUSTOMER_ORDER;VECA.dbo.CUST_ORDER_LINE;VECA.dbo.CUST_LINE_DEL;VECA.dbo.WORK_ORDER,work_orders,False
+old-queries/it queries/MRP monthly database script.sql,4669,VECA,,False,VECA.dbo.PURCHASE_ORDER;VECA.dbo.PURC_ORDER_LINE;VECA.dbo.PURC_LINE_DEL;VECA.dbo.PLANNED_MATL_REQ;VECA.dbo.PLANNED_ORDER;VECA.dbo.REQUIREMENT;VECA.dbo.PART;VECA.dbo.CUSTOMER_ORDER;VECA.dbo.CUST_ORDER_LINE;VECA.dbo.CUST_LINE_DEL;VECA.dbo.WORK_ORDER;my_union,work_orders,False
+old-queries/it queries/More Transaction Lookups.sql,4287,VECA,,False,inventory_trans;TRACE_INV_TRANS;PART;VECA.dbo.PART;VECA.dbo.WORK_ORDER;VECA.dbo.INVENTORY_TRANS;VECA.dbo.TRACE_INV_TRANS;VECA.dbo.PART_CO_BINARY;VECA.dbo.USER_DEF_FIELDS;WORK_ORDER;part_location;INFORMATION_SCHEMA.columns,work_orders,False
+old-queries/it queries/Packaging/TroubleshootingTool.sql,2031,,,False,TRACE_INV_TRANS;INVENTORY_TRANS;WORK_ORDER;PART;PART_CO_BINARY;USER_DEF_FIELDS;PART_SITE,work_orders,False
+old-queries/it queries/Parts on WO not allocated.sql,288,,,False,dbo.WORK_ORDER;dbo.REQUIREMENT,work_orders,False
+"old-queries/it queries/SELECT [t0].[SKU] AS [SKU],.sql",1768,,,False,WORK_ORDER;dbo.REQUIREMENT;PART_LOCATION;REQUIREMENT;PART_SITE;dbo].[SRP_OPEN_ORDER_SKU_DEMAND,work_orders,False
+old-queries/it queries/Sales/Avg Cost by Part ID.sql,520,,,False,work_order;part,work_orders,False
+"old-queries/it queries/Scheduling queries for available, required etc.sql",1383,VECA,,False,REQUIREMENT;PART_SITE;PART;PART_LOCATION;work_order;veca.dbo.inventory_trans,work_orders,False
+old-queries/it queries/Show matching quantities workorder vs transactions.sql,2792,VECA,,False,work_order;inventory_trans;trace_inv_trans,work_orders,False
+old-queries/it queries/Workorder Lookup.sql,1232,VECA,,False,work_order;requirement;DEMAND_SUPPLY_LINK;part_location;cust_order_line,work_orders,False
+old-queries/it queries/Workorder Trace lookup with extra part info.sql,1059,VECA,,False,INVENTORY_TRANS;TRACE_INV_TRANS;part;PART_CO_BINARY;USER_DEF_FIELDS,work_orders,False
+old-queries/it queries/work_order_old_open.sql,1223,,,False,work_order;requirement;DEMAND_SUPPLY_LINK;part_location;cust_order_line,work_orders,False
+old-queries/it queries/Admin-Map Network Drive for MSSQL Backups.sql,428,,CREATE,True,,work_orders,True
+old-queries/it queries/Test for bad trace inv transactions.sql,3623,VECA,UPDATE,True,trace_inv_trans;INVENTORY_TRANS;part;part_location;work_order;trace,work_orders,False

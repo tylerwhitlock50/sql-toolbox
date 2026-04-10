@@ -1,0 +1,38 @@
+{
+  "sql_files": 128,
+  "write_files": 23,
+  "domains": {
+    "accounting_vfin": {
+      "count": 2,
+      "write": 1
+    },
+    "admin_dba": {
+      "count": 7,
+      "write": 3
+    },
+    "labor_timecards": {
+      "count": 5,
+      "write": 0
+    },
+    "other": {
+      "count": 38,
+      "write": 6
+    },
+    "parts_inventory": {
+      "count": 25,
+      "write": 3
+    },
+    "sales_edi": {
+      "count": 1,
+      "write": 1
+    },
+    "shipping": {
+      "count": 25,
+      "write": 7
+    },
+    "work_orders": {
+      "count": 25,
+      "write": 2
+    }
+  }
+}
