@@ -1,0 +1,51 @@
+SELECT [t0].[SKU] AS [SKU],
+  SUM(([Custom SQL Query1].[CALC_QTY] - [Custom SQL Query1].[ISSUED_QTY])) AS [usr:Calculation_1841972261431177216:ok]
+FROM (
+  SELECT 
+  r.PART_ID, 
+  r.CALC_QTY,
+  r.ISSUED_QTY
+  
+  
+  FROM WORK_ORDER AS wo 
+  INNER JOIN dbo.REQUIREMENT AS r ON wo.BASE_ID = r.WORKORDER_BASE_ID
+  
+  WHERE (wo.CREATE_DATE > GETDATE() - 30) 
+  AND (wo.TYPE = 'W') AND (wo.STATUS = 'R') AND (r.PART_ID IS NOT NULL)
+) [Custom SQL Query1]
+  INNER JOIN (
+  SELECT [Custom SQL Query1].[PART_ID] AS [PART_ID (Custom SQL Query1)],
+    [SRP_OPEN_ORDER_SKU_DEMAND].[SKU] AS [SKU]
+  FROM (
+    SELECT 
+    r.PART_ID, 
+    r.CALC_QTY,
+    r.ISSUED_QTY
+    
+    
+    FROM WORK_ORDER AS wo 
+    INNER JOIN dbo.REQUIREMENT AS r ON wo.BASE_ID = r.WORKORDER_BASE_ID
+    
+    WHERE (wo.CREATE_DATE > GETDATE() - 30) 
+    AND (wo.TYPE = 'W') AND (wo.STATUS = 'R') AND (r.PART_ID IS NOT NULL)
+  ) [Custom SQL Query1]
+    INNER JOIN (
+    SELECT
+    PART_ID, 
+    SUM(QTY) AS QTY
+    
+    FROM PART_LOCATION
+    
+    WHERE
+    (STATUS = 'A') AND (WAREHOUSE_ID = 'MAIN')
+    GROUP BY PART_ID
+  ) [Custom SQL Query] ON ([Custom SQL Query1].[PART_ID] = [Custom SQL Query].[PART_ID])
+    INNER JOIN (
+    SELECT WORKORDER_BASE_ID, REQUIREMENT.PART_ID FROM REQUIREMENT 
+    			INNER JOIN PART_SITE ON REQUIREMENT.WORKORDER_BASE_ID = dbo.PART_SITE.PART_ID
+  ) [Custom SQL Query2] ON ([Custom SQL Query1].[PART_ID] = [Custom SQL Query2].[PART_ID])
+    LEFT JOIN [dbo].[SRP_OPEN_ORDER_SKU_DEMAND] [SRP_OPEN_ORDER_SKU_DEMAND] ON ([Custom SQL Query2].[WORKORDER_BASE_ID] = [SRP_OPEN_ORDER_SKU_DEMAND].[SKU])
+  GROUP BY [Custom SQL Query1].[PART_ID],
+    [SRP_OPEN_ORDER_SKU_DEMAND].[SKU]
+) [t0] ON ([Custom SQL Query1].[PART_ID] = [t0].[PART_ID (Custom SQL Query1)])
+GROUP BY [t0].[SKU]

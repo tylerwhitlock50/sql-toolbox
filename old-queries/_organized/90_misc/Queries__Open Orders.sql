@@ -1,0 +1,43 @@
+SELECT 
+ concat(CUSTOMER_ORDER.ID,'/', CUST_ORDER_LINE.LINE_NO,'/', CUST_LINE_DEL.DEL_SCHED_LINE_NO) as Identifier, 
+ CUSTOMER_ORDER.ID,
+ CUST_ORDER_LINE.LINE_NO,
+ CUST_LINE_DEL.DEL_SCHED_LINE_NO,
+ customer_order.Customer_ID,
+ cust_order_line.unit_Price,
+ cust_order_line.trade_disc_Percent,
+ customer_Order.Order_date,
+ 
+ CASE
+	when CUST_LINE_DEL.DESIRED_SHIP_DATE is not null then  CUST_LINE_DEL.DESIRED_SHIP_DATE
+	when CUST_ORDER_LINE.DESIRED_SHIP_DATE is not null then CUST_ORDER_LINE.DESIRED_SHIP_DATE
+	else  CUSTOMER_ORDER.DESIRED_SHIP_DATE end as Desired_Ship_Date,
+
+ CASE
+	when CUST_LINE_DEL.User_1 is not null then  CUST_LINE_DEL.User_1
+	when CUST_ORDER_LINE.Promise_Date is not null then CUST_ORDER_LINE.Promise_Date
+	else  CUSTOMER_ORDER.Promise_DATE end as Promise_Date,	
+	
+ CUST_ORDER_LINE.PART_ID, 
+ 
+ case 
+	when CUST_LINE_DEL.ORDER_QTY is not null then   CUST_LINE_DEL.ORDER_QTY - CUST_LINE_DEL.SHIPPED_QTY
+	else CUST_ORDER_LINE.ORDER_QTY - CUST_ORDER_LINE.TOTAL_SHIPPED_QTY end as Qty
+
+ 
+FROM 
+VECA.dbo.CUSTOMER_ORDER CUSTOMER_ORDER left join VECA.dbo.CUST_ORDER_LINE CUST_ORDER_LINE 
+	on CUSTOMER_ORDER.ID = CUST_ORDER_LINE.CUST_ORDER_ID
+
+left join VECA.dbo.CUST_LINE_DEL CUST_LINE_DEL 
+	on CUST_ORDER_LINE.CUST_ORDER_ID = CUST_LINE_DEL.CUST_ORDER_ID AND CUST_ORDER_LINE.LINE_NO = CUST_LINE_DEL.DEL_SCHED_LINE_NO
+
+
+WHERE  CUST_ORDER_LINE.PART_ID is not null 
+and customer_Order.Status = 'R' 
+and cust_Order_Line.line_status = 'A'
+and 
+
+ case 
+	when CUST_LINE_DEL.ORDER_QTY is not null then   CUST_LINE_DEL.ORDER_QTY - CUST_LINE_DEL.SHIPPED_QTY
+	else CUST_ORDER_LINE.ORDER_QTY - CUST_ORDER_LINE.TOTAL_SHIPPED_QTY end > 0

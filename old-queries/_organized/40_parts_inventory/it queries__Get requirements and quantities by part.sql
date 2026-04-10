@@ -1,0 +1,30 @@
+use veca
+sELECT
+	REQUIREMENT.WORKORDER_BASE_ID AS SKU,
+    REQUIREMENT.PART_ID AS COMPONENT_ID,               -- Component ID
+    MATL.QTY_AVAILABLE_MRP AS IN_BUILDING,               -- Quantity available in MRP
+    REQUIREMENT.CALC_QTY AS REQUIRED_PER_WO,                  -- Quantity required for the SKU
+--    MATL.DESCRIPTION,                                  -- Description of the component
+    ISNULL(MAIN_OHB.QTY, 0) AS USABLE_QTY    -- Actual on-hand quantity in the MAIN warehouse
+FROM 
+    REQUIREMENT
+INNER JOIN 
+    PART_SITE ON REQUIREMENT.WORKORDER_BASE_ID = PART_SITE.PART_ID 
+    AND REQUIREMENT.WORKORDER_LOT_ID = PART_SITE.ENGINEERING_MSTR 
+INNER JOIN 
+    PART ON PART.ID = PART_SITE.PART_ID 
+INNER JOIN 
+    PART MATL ON MATL.ID = REQUIREMENT.PART_ID 
+LEFT OUTER JOIN 
+    (
+        SELECT 
+            PART_LOCATION.PART_ID, 
+            SUM(PART_LOCATION.QTY) AS QTY 
+        FROM 
+            PART_LOCATION 
+        WHERE 
+            PART_LOCATION.STATUS = 'A' AND PART_LOCATION.WAREHOUSE_ID = 'MAIN' 
+        GROUP BY 
+            PART_LOCATION.PART_ID 
+    ) AS MAIN_OHB ON MAIN_OHB.PART_ID = REQUIREMENT.PART_ID
+	where part.id = '801-01031-00'

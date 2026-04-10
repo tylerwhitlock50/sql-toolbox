@@ -1,0 +1,3 @@
+use VFIN
+
+GRANT SELECT,UPDATE,INSERT,DELETE ON dbo.customer_order TO JAYTID;

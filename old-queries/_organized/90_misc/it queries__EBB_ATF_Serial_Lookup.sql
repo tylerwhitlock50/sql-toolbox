@@ -1,0 +1,1 @@
+select * from [BC15 Christensen Arms].[dbo].[TDJ Buyer LLC$Easy Bound Book$edafca1e-50f0-4968-9832-c717a8334d71] WHERE (dispcompany='') AND (Corrected=0) ORDER BY acqdate desc
