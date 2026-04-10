@@ -26,14 +26,22 @@
 
 --------------------------------------------------------------------------------
 -- PARAMETERS: Update these before running
+--
+-- @DedupeMode options:
+--   'HYBRID'  = All VECA rows + VFIN rows that are NOT Exchange-sourced (recommended)
+--   'VFIN'    = VFIN-only (GL view; manufacturing shown as batch summaries)
+--   'VECA'    = VECA-only (operational detail)
+--   'NONE'    = Everything (WILL double-count - diagnostic use only)
 --------------------------------------------------------------------------------
-DECLARE @DateFrom     date        = '2026-01-01';  -- Start of date range (inclusive)
-DECLARE @DateTo       date        = '2026-04-09';  -- End of date range (inclusive)
-DECLARE @PostedOnly   bit         = 1;             -- 1 = posted only, 0 = include unposted VECA
-DECLARE @SourceDB     nvarchar(4) = NULL;          -- NULL = both, 'VECA', or 'VFIN'
-DECLARE @JournalType  nvarchar(20)= NULL;          -- NULL = all, or specific type like 'VFIN_RECV'
-DECLARE @AccountID    nvarchar(30)= NULL;          -- NULL = all, or specific GL account
-DECLARE @FSType       nvarchar(10)= NULL;          -- NULL = all, 'IS' = Income Statement, 'BS' = Balance Sheet
+DECLARE @DateFrom     date         = '2026-01-01';  -- Start of date range (inclusive)
+DECLARE @DateTo       date         = '2026-04-09';  -- End of date range (inclusive)
+DECLARE @DedupeMode   nvarchar(10) = 'HYBRID';      -- 'HYBRID'|'VFIN'|'VECA'|'NONE'
+DECLARE @PostedOnly   bit          = 1;             -- 1 = posted only, 0 = include unposted VECA
+DECLARE @SourceDB     nvarchar(4)  = NULL;          -- NULL = both, 'VECA', or 'VFIN' (secondary filter)
+DECLARE @JournalType  nvarchar(20) = NULL;          -- NULL = all, or specific type like 'VFIN_RECV'
+DECLARE @AccountID    nvarchar(30) = NULL;          -- NULL = all, or specific GL account
+DECLARE @FSType       nvarchar(10) = NULL;          -- NULL = all, 'IS' = Income Statement, 'BS' = Balance Sheet
+DECLARE @ExchangeMark nvarchar(40) = 'Updated by Exchange';  -- Marker in VFIN REFERENCE for Exchange-sourced rows
 --------------------------------------------------------------------------------
 
 SELECT
@@ -320,5 +328,15 @@ WHERE M.POSTING_DATE >= @DateFrom
   AND (@JournalType IS NULL OR M.JOURNAL_TYPE = @JournalType)
   AND (@AccountID IS NULL OR M.GL_ACCOUNT_ID = @AccountID)
   AND (@FSType IS NULL OR G.FS = @FSType)
+  -- De-duplication logic based on @DedupeMode
+  AND (
+         @DedupeMode = 'NONE'
+      OR (@DedupeMode = 'VECA' AND M.SOURCE_DB = 'VECA')
+      OR (@DedupeMode = 'VFIN' AND M.SOURCE_DB = 'VFIN')
+      OR (@DedupeMode = 'HYBRID' AND (
+              M.SOURCE_DB = 'VECA'
+              OR (M.SOURCE_DB = 'VFIN' AND (M.REFERENCE IS NULL OR M.REFERENCE <> @ExchangeMark))
+         ))
+      )
 
 ORDER BY M.POSTING_DATE, M.SOURCE_DB, M.JOURNAL_TYPE;

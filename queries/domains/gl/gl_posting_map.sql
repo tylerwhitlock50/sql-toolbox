@@ -6,6 +6,34 @@
   normalized result set. Use this to answer: "What posted, from where,
   and what source document triggered it?"
 
+  ⚠ CRITICAL: VECA/VFIN OVERLAP - DIAGNOSED AND HANDLED VIA @DedupeMode
+  ------------------------------------------------------------------
+  Visual Exchange pushes VECA activity into VFIN as follows:
+    - AR invoices: copied row-for-row into VFIN.RECEIVABLES_RECEIVABLE_DIST
+      (REFERENCE = 'Updated by Exchange')
+    - VECA manufacturing (WIP, SHIPMENT, PURCHASE, ADJUST, INDIRECT): each
+      VECA batch summarized into VFIN.LEDGER_GEN_JOURN_DIST as batch-level
+      general journal entries (REFERENCE = 'Updated by Exchange')
+    - AP/Payments/Bank Adj/Direct Journals: VFIN-native (no VECA equivalent)
+    - Manual VFIN entries (not from Exchange): REFERENCE is NULL, other text,
+      or a user-entered reference
+
+  The REFERENCE field value 'Updated by Exchange' is the definitive marker
+  that identifies a VFIN row as an echo of a VECA entry.
+
+  @DedupeMode options:
+    'HYBRID'  = VECA for detail + VFIN-native only (recommended default)
+                Includes all VECA dists PLUS VFIN rows where REFERENCE is
+                NOT 'Updated by Exchange'. Gives you detail from VECA and
+                VFIN-only entries without double-counting.
+    'VFIN'    = VFIN only (GL-view only, summarized for manufacturing)
+                Includes all VFIN dists. Excludes all VECA dists. Use when
+                you want to match VFIN's GL totals exactly.
+    'VECA'    = VECA only (detail-view for operations)
+                Includes all VECA dists. Excludes all VFIN dists. Use when
+                you only care about VECA-sourced operational activity.
+    'NONE'    = Include everything (WILL DOUBLE-COUNT - diagnostic only)
+
   Columns:
     SOURCE_DB        - 'VECA' or 'VFIN'
     JOURNAL_TYPE     - Short code identifying the posting source
@@ -55,12 +83,14 @@
 --------------------------------------------------------------------------------
 -- PARAMETERS: Update these before running
 --------------------------------------------------------------------------------
-DECLARE @DateFrom     date        = '2026-01-01';  -- Start of date range (inclusive)
-DECLARE @DateTo       date        = '2026-04-09';  -- End of date range (inclusive)
-DECLARE @PostedOnly   bit         = 1;             -- 1 = posted only, 0 = include unposted VECA
-DECLARE @SourceDB     nvarchar(4) = NULL;          -- NULL = both, 'VECA', or 'VFIN'
-DECLARE @JournalType  nvarchar(20)= NULL;          -- NULL = all, or specific type like 'VFIN_PAYMENT'
-DECLARE @AccountID    nvarchar(30)= NULL;          -- NULL = all, or specific GL account like '4100'
+DECLARE @DateFrom     date         = '2026-01-01';  -- Start of date range (inclusive)
+DECLARE @DateTo       date         = '2026-04-09';  -- End of date range (inclusive)
+DECLARE @DedupeMode   nvarchar(10) = 'HYBRID';      -- 'HYBRID'|'VFIN'|'VECA'|'NONE' (see header)
+DECLARE @PostedOnly   bit          = 1;             -- 1 = posted only, 0 = include unposted VECA
+DECLARE @SourceDB     nvarchar(4)  = NULL;          -- NULL = both, 'VECA', or 'VFIN' (secondary filter)
+DECLARE @JournalType  nvarchar(20) = NULL;          -- NULL = all, or specific type like 'VFIN_PAYMENT'
+DECLARE @AccountID    nvarchar(30) = NULL;          -- NULL = all, or specific GL account like '4100'
+DECLARE @ExchangeMark nvarchar(40) = 'Updated by Exchange';  -- Marker in VFIN REFERENCE for Exchange-sourced rows
 --------------------------------------------------------------------------------
 
 SELECT * FROM (
@@ -621,5 +651,16 @@ WHERE POSTING_DATE >= @DateFrom
   AND (@SourceDB IS NULL OR SOURCE_DB = @SourceDB)
   AND (@JournalType IS NULL OR JOURNAL_TYPE = @JournalType)
   AND (@AccountID IS NULL OR GL_ACCOUNT_ID = @AccountID)
+  -- De-duplication logic based on @DedupeMode
+  AND (
+         @DedupeMode = 'NONE'
+      OR (@DedupeMode = 'VECA' AND SOURCE_DB = 'VECA')
+      OR (@DedupeMode = 'VFIN' AND SOURCE_DB = 'VFIN')
+      -- HYBRID: all VECA rows + VFIN rows that are NOT Exchange-sourced
+      OR (@DedupeMode = 'HYBRID' AND (
+              SOURCE_DB = 'VECA'
+              OR (SOURCE_DB = 'VFIN' AND (REFERENCE IS NULL OR REFERENCE <> @ExchangeMark))
+         ))
+      )
 
 ORDER BY POSTING_DATE, SOURCE_DB, JOURNAL_TYPE;

@@ -7,7 +7,8 @@
       "Bash(iconv -f UTF-16LE -t UTF-8 \"C:\\\\Users\\\\TylerW\\\\sql-toolbox\\\\database_scripts\\\\veca\\\\dbo.PURC_ORDER_LINE.Table.sql\")",
       "Bash(iconv -f UTF-16LE -t UTF-8 \"C:\\\\Users\\\\TylerW\\\\sql-toolbox\\\\database_scripts\\\\veca\\\\dbo.PURC_LINE_DEL.Table.sql\")",
       "Bash(ls -1 \"C:\\\\Users\\\\TylerW\\\\sql-toolbox\\\\database_scripts\\\\veca\\\\dbo.PURC\"*.sql)",
-      "Bash(ls \"C:/Users/TylerW/sql-toolbox/database_scripts/vfin/dbo.PAYABLES_\"*.sql)"
+      "Bash(ls \"C:/Users/TylerW/sql-toolbox/database_scripts/vfin/dbo.PAYABLES_\"*.sql)",
+      "Bash(ls /c/Users/TylerW/sql-toolbox/database_scripts/veca/dbo.INVENTORY*)"
     ]
   }
 }
