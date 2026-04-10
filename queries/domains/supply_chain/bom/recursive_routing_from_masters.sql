@@ -47,6 +47,7 @@ DECLARE @MaxDepth int          = 20;
         top_wo.SPLIT_ID                      AS WO_SPLIT_ID,
         top_wo.SUB_ID                        AS WO_SUB_ID,
         CAST(1 AS decimal(28,8))             AS ASSEMBLY_QTY_PER_TOP,
+        top_wo.DESIRED_QTY                   AS MASTER_DESIRED_QTY,
         CAST('/' + top_psv.PART_ID + '/' AS nvarchar(4000)) AS PATH
     FROM   PART_SITE_VIEW top_psv
     JOIN   WORK_ORDER     top_wo
@@ -70,7 +71,8 @@ DECLARE @MaxDepth int          = 20;
         child_wo.LOT_ID,
         child_wo.SPLIT_ID,
         child_wo.SUB_ID,
-        CAST(parent.ASSEMBLY_QTY_PER_TOP * req.CALC_QTY AS decimal(28,8)),
+        CAST(parent.ASSEMBLY_QTY_PER_TOP * (req.CALC_QTY / NULLIF(parent.MASTER_DESIRED_QTY, 0)) AS decimal(28,8)),
+        child_wo.DESIRED_QTY,
         CAST(parent.PATH + req.PART_ID + '/' AS nvarchar(4000))
     FROM   bom_asm parent
     JOIN   REQUIREMENT req

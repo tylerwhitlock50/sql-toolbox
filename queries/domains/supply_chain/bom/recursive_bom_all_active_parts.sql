@@ -44,8 +44,10 @@ bom AS
         req.OPERATION_SEQ_NO,
         req.PIECE_NO,
         req.PART_ID                          AS COMPONENT_PART_ID,
-        req.CALC_QTY                         AS QTY_PER,
-        CAST(req.CALC_QTY AS decimal(28,8))  AS EXTENDED_QTY,
+        req.QTY_PER                                                               AS QTY_PER,
+        req.USAGE_UM                                                              AS USAGE_UM,
+        req.CALC_QTY / NULLIF(top_wo.DESIRED_QTY, 0)                              AS STOCK_QTY_PER,
+        CAST(req.CALC_QTY / NULLIF(top_wo.DESIRED_QTY, 0) AS decimal(28,8))       AS EXTENDED_QTY,
         req.SCRAP_PERCENT,
         req.STATUS                           AS REQ_STATUS,
         CAST('/' + top_wo.PART_ID + '/' + req.PART_ID + '/' AS nvarchar(4000)) AS PATH
@@ -84,8 +86,10 @@ bom AS
         child_req.OPERATION_SEQ_NO,
         child_req.PIECE_NO,
         child_req.PART_ID,
-        child_req.CALC_QTY,
-        CAST(parent.EXTENDED_QTY * child_req.CALC_QTY AS decimal(28,8)),
+        child_req.QTY_PER,
+        child_req.USAGE_UM,
+        child_req.CALC_QTY / NULLIF(child_wo.DESIRED_QTY, 0),
+        CAST(parent.EXTENDED_QTY * (child_req.CALC_QTY / NULLIF(child_wo.DESIRED_QTY, 0)) AS decimal(28,8)),
         child_req.SCRAP_PERCENT,
         child_req.STATUS,
         CAST(parent.PATH + child_req.PART_ID + '/' AS nvarchar(4000))
@@ -125,8 +129,13 @@ SELECT
     x.COMPONENT_PART_ID,
     x.OPERATION_SEQ_NO,
     x.PIECE_NO,
-    x.QTY_PER,
-    x.EXTENDED_QTY,
+    x.QTY_PER,                                                       -- raw REQ.QTY_PER in USAGE_UM
+    x.USAGE_UM,                                                      -- unit the engineer entered QTY_PER in
+    x.STOCK_QTY_PER,                                                 -- per-assembly yield in the component's STOCK_UM
+    psv.STOCK_UM,                                                    -- UM for STOCK_QTY_PER / EXTENDED_QTY
+    x.EXTENDED_QTY,                                                  -- cumulative STOCK_QTY_PER chain (stock UM)
+    CAST(x.EXTENDED_QTY * psv.UNIT_MATERIAL_COST AS decimal(18,4))
+        AS EXTENDED_MATERIAL_COST,                                   -- $ per 1 top assembly
     x.SCRAP_PERCENT,
     x.REQ_STATUS,
     CASE
@@ -188,7 +197,9 @@ FROM
         CAST(NULL AS nvarchar(30))     AS COMPONENT_PART_ID,
         CAST(NULL AS smallint)         AS OPERATION_SEQ_NO,
         CAST(NULL AS smallint)         AS PIECE_NO,
-        CAST(1 AS decimal(28,8))       AS QTY_PER,
+        CAST(1 AS decimal(20,8))       AS QTY_PER,
+        CAST(NULL AS nvarchar(15))     AS USAGE_UM,
+        CAST(1 AS decimal(28,8))       AS STOCK_QTY_PER,
         CAST(1 AS decimal(28,8))       AS EXTENDED_QTY,
         CAST(NULL AS decimal(5,2))     AS SCRAP_PERCENT,
         CAST(NULL AS nchar(1))         AS REQ_STATUS,
@@ -223,7 +234,7 @@ FROM
     UNION ALL
 
     SELECT TOP_PART_ID, BOM_LEVEL, BUILD_PART_ID, COMPONENT_PART_ID, OPERATION_SEQ_NO,
-           PIECE_NO, QTY_PER, EXTENDED_QTY, SCRAP_PERCENT, REQ_STATUS,
+           PIECE_NO, QTY_PER, USAGE_UM, STOCK_QTY_PER, EXTENDED_QTY, SCRAP_PERCENT, REQ_STATUS,
            WO_TYPE, WO_BASE_ID, WO_LOT_ID, WO_SPLIT_ID, WO_SUB_ID, PATH
     FROM   bom
 ) x

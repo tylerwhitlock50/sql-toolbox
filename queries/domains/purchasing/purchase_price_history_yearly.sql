@@ -37,12 +37,7 @@ DECLARE @FromYear    int          = 2020;    -- inclusive
         it.TRANSACTION_DATE,
         it.QTY,
         it.ACT_MATERIAL_COST,
-        CAST(it.ACT_MATERIAL_COST / it.QTY AS decimal(22,8)) AS UNIT_COST,
-        -- Median is a window function in SQL Server; compute once per partition
-        PERCENTILE_CONT(0.5)
-            WITHIN GROUP (ORDER BY CAST(it.ACT_MATERIAL_COST / it.QTY AS decimal(22,8)))
-            OVER (PARTITION BY it.PART_ID, YEAR(it.TRANSACTION_DATE))
-                                            AS MEDIAN_UNIT_COST
+        CAST(it.ACT_MATERIAL_COST / it.QTY AS decimal(22,8)) AS UNIT_COST
     FROM   INVENTORY_TRANS it
     WHERE  it.TYPE = 'I'
       AND  it.CLASS = 'R'
@@ -52,6 +47,28 @@ DECLARE @FromYear    int          = 2020;    -- inclusive
       AND  it.ACT_MATERIAL_COST > 0
       AND  YEAR(it.TRANSACTION_DATE) >= @FromYear
       AND  (@Site IS NULL OR it.SITE_ID = @Site)
+),
+-- Manual median: number each row within (PART_ID, YR) by UNIT_COST asc,
+-- then pick the middle one (odd count) or average the two middle ones (even).
+ranked AS
+(
+    SELECT
+        r.PART_ID,
+        r.YR,
+        r.UNIT_COST,
+        ROW_NUMBER() OVER (PARTITION BY r.PART_ID, r.YR ORDER BY r.UNIT_COST) AS RN,
+        COUNT(*)     OVER (PARTITION BY r.PART_ID, r.YR)                      AS CNT
+    FROM receipts r
+),
+median_per_group AS
+(
+    SELECT
+        PART_ID,
+        YR,
+        AVG(UNIT_COST) AS MEDIAN_UNIT_COST
+    FROM   ranked
+    WHERE  RN IN ((CNT + 1) / 2, (CNT + 2) / 2)
+    GROUP BY PART_ID, YR
 )
 SELECT
     r.PART_ID,
@@ -64,12 +81,15 @@ SELECT
     CAST(MIN(r.UNIT_COST)    AS decimal(22,8))          AS MIN_UNIT_COST,
     CAST(MAX(r.UNIT_COST)    AS decimal(22,8))          AS MAX_UNIT_COST,
     CAST(AVG(r.UNIT_COST)    AS decimal(22,8))          AS AVG_UNIT_COST,       -- simple avg of receipts
-    CAST(MIN(r.MEDIAN_UNIT_COST) AS decimal(22,8))      AS MEDIAN_UNIT_COST,     -- constant within group
+    CAST(MIN(m.MEDIAN_UNIT_COST) AS decimal(22,8))      AS MEDIAN_UNIT_COST,     -- constant within group
     CAST(SUM(r.ACT_MATERIAL_COST) / NULLIF(SUM(r.QTY),0) AS decimal(22,8))
                                                         AS WEIGHTED_AVG_UNIT_COST,
     MIN(r.TRANSACTION_DATE)                             AS FIRST_RECEIPT_IN_YEAR,
     MAX(r.TRANSACTION_DATE)                             AS LAST_RECEIPT_IN_YEAR
 FROM   receipts r
+LEFT   JOIN median_per_group m
+       ON  m.PART_ID = r.PART_ID
+       AND m.YR      = r.YR
 LEFT   JOIN PART_SITE_VIEW psv
        ON  psv.PART_ID = r.PART_ID
        AND (@Site IS NULL OR psv.SITE_ID = @Site)
