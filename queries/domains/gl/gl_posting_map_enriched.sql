@@ -41,7 +41,7 @@ DECLARE @SourceDB     nvarchar(4)  = NULL;          -- NULL = both, 'VECA', or '
 DECLARE @JournalType  nvarchar(20) = NULL;          -- NULL = all, or specific type like 'VFIN_RECV'
 DECLARE @AccountID    nvarchar(30) = NULL;          -- NULL = all, or specific GL account
 DECLARE @FSType       nvarchar(10) = NULL;          -- NULL = all, 'IS' = Income Statement, 'BS' = Balance Sheet
-DECLARE @ExchangeMark nvarchar(40) = 'Updated by Exchange';  -- Marker in VFIN REFERENCE for Exchange-sourced rows
+DECLARE @ExchangeMark nvarchar(40) = 'USD%';        -- LIKE pattern in VFIN REFERENCE for Exchange-sourced rows
 --------------------------------------------------------------------------------
 
 SELECT
@@ -333,9 +333,12 @@ WHERE M.POSTING_DATE >= @DateFrom
          @DedupeMode = 'NONE'
       OR (@DedupeMode = 'VECA' AND M.SOURCE_DB = 'VECA')
       OR (@DedupeMode = 'VFIN' AND M.SOURCE_DB = 'VFIN')
+      -- HYBRID: all VECA rows + VFIN rows that are NOT Exchange-sourced
+      -- (VFIN rows whose REFERENCE starts with 'USD' are batched journal
+      --  entries pushed in by Visual Exchange and duplicate VECA detail.)
       OR (@DedupeMode = 'HYBRID' AND (
               M.SOURCE_DB = 'VECA'
-              OR (M.SOURCE_DB = 'VFIN' AND (M.REFERENCE IS NULL OR M.REFERENCE <> @ExchangeMark))
+              OR (M.SOURCE_DB = 'VFIN' AND (M.REFERENCE IS NULL OR M.REFERENCE NOT LIKE @ExchangeMark))
          ))
       )
 

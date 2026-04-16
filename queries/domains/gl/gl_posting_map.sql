@@ -10,21 +10,22 @@
   ------------------------------------------------------------------
   Visual Exchange pushes VECA activity into VFIN as follows:
     - AR invoices: copied row-for-row into VFIN.RECEIVABLES_RECEIVABLE_DIST
-      (REFERENCE = 'Updated by Exchange')
+      (REFERENCE starts with 'USD')
     - VECA manufacturing (WIP, SHIPMENT, PURCHASE, ADJUST, INDIRECT): each
       VECA batch summarized into VFIN.LEDGER_GEN_JOURN_DIST as batch-level
-      general journal entries (REFERENCE = 'Updated by Exchange')
+      general journal entries (REFERENCE starts with 'USD')
     - AP/Payments/Bank Adj/Direct Journals: VFIN-native (no VECA equivalent)
     - Manual VFIN entries (not from Exchange): REFERENCE is NULL, other text,
       or a user-entered reference
 
-  The REFERENCE field value 'Updated by Exchange' is the definitive marker
-  that identifies a VFIN row as an echo of a VECA entry.
+  The REFERENCE field pattern 'USD%' is the definitive marker that
+  identifies a VFIN row as an echo of a VECA entry (batched journal entries
+  produced by Visual Exchange are tagged with the USD currency code prefix).
 
   @DedupeMode options:
     'HYBRID'  = VECA for detail + VFIN-native only (recommended default)
-                Includes all VECA dists PLUS VFIN rows where REFERENCE is
-                NOT 'Updated by Exchange'. Gives you detail from VECA and
+                Includes all VECA dists PLUS VFIN rows where REFERENCE does
+                NOT start with 'USD'. Gives you detail from VECA and
                 VFIN-only entries without double-counting.
     'VFIN'    = VFIN only (GL-view only, summarized for manufacturing)
                 Includes all VFIN dists. Excludes all VECA dists. Use when
@@ -83,14 +84,14 @@
 --------------------------------------------------------------------------------
 -- PARAMETERS: Update these before running
 --------------------------------------------------------------------------------
-DECLARE @DateFrom     date         = '2026-01-01';  -- Start of date range (inclusive)
-DECLARE @DateTo       date         = '2026-04-09';  -- End of date range (inclusive)
+DECLARE @DateFrom     date         = '2026-03-01';  -- Start of date range (inclusive)
+DECLARE @DateTo       date         = '2026-03-31';  -- End of date range (inclusive)
 DECLARE @DedupeMode   nvarchar(10) = 'HYBRID';      -- 'HYBRID'|'VFIN'|'VECA'|'NONE' (see header)
 DECLARE @PostedOnly   bit          = 1;             -- 1 = posted only, 0 = include unposted VECA
 DECLARE @SourceDB     nvarchar(4)  = NULL;          -- NULL = both, 'VECA', or 'VFIN' (secondary filter)
 DECLARE @JournalType  nvarchar(20) = NULL;          -- NULL = all, or specific type like 'VFIN_PAYMENT'
 DECLARE @AccountID    nvarchar(30) = NULL;          -- NULL = all, or specific GL account like '4100'
-DECLARE @ExchangeMark nvarchar(40) = 'Updated by Exchange';  -- Marker in VFIN REFERENCE for Exchange-sourced rows
+DECLARE @ExchangeMark nvarchar(40) = 'USD%';        -- LIKE pattern in VFIN REFERENCE for Exchange-sourced rows
 --------------------------------------------------------------------------------
 
 SELECT * FROM (
@@ -657,9 +658,11 @@ WHERE POSTING_DATE >= @DateFrom
       OR (@DedupeMode = 'VECA' AND SOURCE_DB = 'VECA')
       OR (@DedupeMode = 'VFIN' AND SOURCE_DB = 'VFIN')
       -- HYBRID: all VECA rows + VFIN rows that are NOT Exchange-sourced
+      -- (VFIN rows whose REFERENCE starts with 'USD' are batched journal
+      --  entries pushed in by Visual Exchange and duplicate VECA detail.)
       OR (@DedupeMode = 'HYBRID' AND (
               SOURCE_DB = 'VECA'
-              OR (SOURCE_DB = 'VFIN' AND (REFERENCE IS NULL OR REFERENCE <> @ExchangeMark))
+              OR (SOURCE_DB = 'VFIN' AND (REFERENCE IS NULL OR REFERENCE NOT LIKE @ExchangeMark))
          ))
       )
 
