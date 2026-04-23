@@ -188,6 +188,7 @@ open_requirements AS (
        AND w.lot_id   = r.workorder_lot_id
        AND w.split_id = r.workorder_split_id
        AND w.sub_id   = r.workorder_sub_id
+       AND w.type = r.workorder_type
     WHERE w.type = 'W'
       AND w.status IN ('F', 'R')
       AND r.status IN ('F', 'R')
