@@ -1,0 +1,263 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+===============================================================================
+Report: Material Shortage Expedite List
+File:   reports/material_shortage_expedite.rdl
+Source: queries/domains/supply_chain/performance/material_shortage_vs_open_demand.sql
+
+Purpose:
+    Daily expedite list. For each purchased part with a net shortage,
+    surface the open SO demand at risk + the PO date. Buyer's call list.
+
+Audience: Buyers, planners, materials manager.
+
+Parameters:
+    Site - blank = all sites
+===============================================================================
+-->
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2010/01/reportdefinition"
+        xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="VECA">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString>Data Source=YOUR_SERVER;Initial Catalog=VECA</ConnectString>
+        <IntegratedSecurity>true</IntegratedSecurity>
+      </ConnectionProperties>
+      <rd:SecurityType>Integrated</rd:SecurityType>
+      <rd:DataSourceID>6f4e2c8a-9d31-4b67-8a22-1e8f7c2d3e91</rd:DataSourceID>
+    </DataSource>
+  </DataSources>
+  <DataSets>
+    <DataSet Name="MaterialShortage">
+      <Query>
+        <DataSourceName>VECA</DataSourceName>
+        <CommandText><![CDATA[
+;WITH part_site AS (
+    SELECT psv.SITE_ID, psv.PART_ID, psv.DESCRIPTION, psv.STOCK_UM,
+           psv.PRODUCT_CODE, psv.COMMODITY_CODE, psv.PURCHASED, psv.FABRICATED,
+           psv.BUYER_USER_ID, psv.PLANNER_USER_ID, psv.PLANNING_LEADTIME,
+           psv.QTY_ON_HAND, psv.SAFETY_STOCK_QTY,
+           (psv.UNIT_MATERIAL_COST + psv.UNIT_LABOR_COST
+            + psv.UNIT_BURDEN_COST + psv.UNIT_SERVICE_COST) AS std_unit_cost
+    FROM PART_SITE_VIEW psv
+    WHERE (@Site IS NULL OR @Site='' OR psv.SITE_ID = @Site)
+),
+open_req AS (
+    SELECT wo.SITE_ID, rq.PART_ID,
+           SUM(COALESCE(rq.CALC_QTY, 0) - COALESCE(rq.ISSUED_QTY, 0)) AS open_req_qty,
+           MIN(rq.REQUIRED_DATE) AS earliest_required_date,
+           COUNT(DISTINCT rq.WORKORDER_TYPE+'|'+rq.WORKORDER_BASE_ID+'|'+rq.WORKORDER_LOT_ID
+                          +'|'+rq.WORKORDER_SPLIT_ID+'|'+rq.WORKORDER_SUB_ID) AS open_wos
+    FROM REQUIREMENT rq
+    INNER JOIN WORK_ORDER wo ON wo.TYPE=rq.WORKORDER_TYPE AND wo.BASE_ID=rq.WORKORDER_BASE_ID
+        AND wo.LOT_ID=rq.WORKORDER_LOT_ID AND wo.SPLIT_ID=rq.WORKORDER_SPLIT_ID
+        AND wo.SUB_ID=rq.WORKORDER_SUB_ID
+    WHERE rq.STATUS='U' AND ISNULL(wo.STATUS,'') NOT IN ('X','C')
+      AND rq.PART_ID IS NOT NULL
+      AND (@Site IS NULL OR @Site='' OR wo.SITE_ID = @Site)
+      AND (COALESCE(rq.CALC_QTY,0) - COALESCE(rq.ISSUED_QTY,0)) > 0
+    GROUP BY wo.SITE_ID, rq.PART_ID
+),
+open_po_supply AS (
+    SELECT p.SITE_ID, pl.PART_ID,
+           SUM((pl.ORDER_QTY - pl.TOTAL_RECEIVED_QTY)
+                * CASE WHEN pl.PURCHASE_UM = ps.STOCK_UM THEN 1.0
+                       WHEN puc.CONVERSION_FACTOR IS NOT NULL THEN puc.CONVERSION_FACTOR
+                       WHEN duc.CONVERSION_FACTOR IS NOT NULL THEN duc.CONVERSION_FACTOR
+                       ELSE 1.0 END) AS open_po_qty_stock_um,
+           MIN(COALESCE(pl.DESIRED_RECV_DATE, p.PROMISE_DATE, p.DESIRED_RECV_DATE)) AS earliest_po_recv_date
+    FROM PURCHASE_ORDER p
+    INNER JOIN PURC_ORDER_LINE pl ON pl.PURC_ORDER_ID = p.ID
+    LEFT JOIN part_site ps ON ps.SITE_ID = p.SITE_ID AND ps.PART_ID = pl.PART_ID
+    LEFT JOIN PART_UNITS_CONV puc ON puc.PART_ID = pl.PART_ID
+        AND puc.FROM_UM = pl.PURCHASE_UM AND puc.TO_UM = ps.STOCK_UM
+    LEFT JOIN UNITS_CONVERSION duc ON duc.FROM_UM = pl.PURCHASE_UM AND duc.TO_UM = ps.STOCK_UM
+    WHERE ISNULL(p.STATUS,'') NOT IN ('X','C')
+      AND ISNULL(pl.LINE_STATUS,'') NOT IN ('X','C')
+      AND pl.PART_ID IS NOT NULL AND pl.ORDER_QTY > pl.TOTAL_RECEIVED_QTY
+      AND (@Site IS NULL OR @Site='' OR p.SITE_ID = @Site)
+    GROUP BY p.SITE_ID, pl.PART_ID
+),
+planned_supply AS (
+    SELECT po.SITE_ID, po.PART_ID, SUM(po.ORDER_QTY) AS planned_qty_stock_um
+    FROM PLANNED_ORDER po
+    WHERE (@Site IS NULL OR @Site='' OR po.SITE_ID = @Site)
+    GROUP BY po.SITE_ID, po.PART_ID
+),
+open_so_demand AS (
+    SELECT col.SITE_ID, col.PART_ID, COUNT(*) AS open_so_lines,
+           COUNT(DISTINCT col.CUST_ORDER_ID) AS open_so_count,
+           SUM(col.ORDER_QTY - col.TOTAL_SHIPPED_QTY) AS open_so_qty,
+           SUM((col.ORDER_QTY - col.TOTAL_SHIPPED_QTY) * col.UNIT_PRICE) AS open_so_value,
+           MIN(col.DESIRED_SHIP_DATE) AS earliest_so_ship_date
+    FROM CUST_ORDER_LINE col
+    INNER JOIN CUSTOMER_ORDER co ON co.ID = col.CUST_ORDER_ID
+    WHERE co.STATUS IN ('R', 'F') AND col.LINE_STATUS = 'A'
+      AND col.ORDER_QTY > col.TOTAL_SHIPPED_QTY
+      AND (@Site IS NULL OR @Site='' OR col.SITE_ID = @Site)
+    GROUP BY col.SITE_ID, col.PART_ID
+),
+combined AS (
+    SELECT ps.SITE_ID, ps.PART_ID, ps.DESCRIPTION, ps.PRODUCT_CODE, ps.COMMODITY_CODE,
+           ps.PURCHASED, ps.FABRICATED, ps.BUYER_USER_ID, ps.PLANNER_USER_ID,
+           ps.PLANNING_LEADTIME, ps.STOCK_UM, ps.std_unit_cost,
+           COALESCE(ps.QTY_ON_HAND, 0) AS qty_on_hand,
+           COALESCE(ps.SAFETY_STOCK_QTY, 0) AS safety_stock,
+           COALESCE(orq.open_req_qty, 0) AS open_wo_req_qty,
+           orq.earliest_required_date,
+           COALESCE(orq.open_wos, 0) AS open_wos,
+           COALESCE(ops.open_po_qty_stock_um, 0) AS open_po_qty,
+           ops.earliest_po_recv_date,
+           COALESCE(pls.planned_qty_stock_um, 0) AS planned_qty,
+           COALESCE(sod.open_so_count, 0) AS open_so_count,
+           COALESCE(sod.open_so_qty, 0) AS open_so_qty,
+           COALESCE(sod.open_so_value, 0) AS open_so_value_at_risk,
+           sod.earliest_so_ship_date
+    FROM part_site ps
+    LEFT JOIN open_req orq ON orq.SITE_ID = ps.SITE_ID AND orq.PART_ID = ps.PART_ID
+    LEFT JOIN open_po_supply ops ON ops.SITE_ID = ps.SITE_ID AND ops.PART_ID = ps.PART_ID
+    LEFT JOIN planned_supply pls ON pls.SITE_ID = ps.SITE_ID AND pls.PART_ID = ps.PART_ID
+    LEFT JOIN open_so_demand sod ON sod.SITE_ID = ps.SITE_ID AND sod.PART_ID = ps.PART_ID
+    WHERE (COALESCE(orq.open_req_qty, 0) > 0 OR COALESCE(sod.open_so_qty, 0) > 0)
+)
+SELECT
+    c.SITE_ID, c.PART_ID, c.DESCRIPTION, c.PRODUCT_CODE, c.PURCHASED, c.FABRICATED,
+    c.BUYER_USER_ID, c.PLANNING_LEADTIME, c.STOCK_UM,
+    c.qty_on_hand, c.safety_stock, c.open_wos, c.open_wo_req_qty,
+    c.earliest_required_date, c.open_po_qty, c.earliest_po_recv_date, c.planned_qty,
+    (c.qty_on_hand + c.open_po_qty + c.planned_qty - c.open_wo_req_qty) AS projected_position,
+    CASE WHEN (c.qty_on_hand + c.open_po_qty + c.planned_qty - c.open_wo_req_qty) < 0
+         THEN ABS(c.qty_on_hand + c.open_po_qty + c.planned_qty - c.open_wo_req_qty)
+         ELSE 0 END AS shortage_qty,
+    CASE WHEN (c.qty_on_hand + c.open_po_qty + c.planned_qty - c.open_wo_req_qty) < 0
+         THEN ABS(c.qty_on_hand + c.open_po_qty + c.planned_qty - c.open_wo_req_qty) * c.std_unit_cost
+         ELSE 0 END AS shortage_value_at_std,
+    DATEDIFF(day, c.earliest_po_recv_date, c.earliest_required_date) AS po_recv_vs_required_gap_days,
+    c.open_so_count, c.open_so_qty, c.open_so_value_at_risk, c.earliest_so_ship_date,
+    CASE WHEN (c.qty_on_hand + c.open_po_qty + c.planned_qty - c.open_wo_req_qty) < 0
+         AND c.open_so_value_at_risk > 0 THEN 'CRITICAL - short + SO demand'
+         WHEN (c.qty_on_hand + c.open_po_qty + c.planned_qty - c.open_wo_req_qty) < 0 THEN 'SHORT'
+         WHEN c.earliest_po_recv_date > c.earliest_required_date THEN 'PO LATE FOR NEED'
+         WHEN c.open_po_qty = 0 AND c.planned_qty = 0
+              AND c.open_wo_req_qty > c.qty_on_hand THEN 'NO COVERAGE PLANNED'
+         ELSE 'OK' END AS status
+FROM combined c
+WHERE (c.qty_on_hand + c.open_po_qty + c.planned_qty - c.open_wo_req_qty) < 0
+   OR c.earliest_po_recv_date > c.earliest_required_date
+   OR (c.open_po_qty = 0 AND c.planned_qty = 0 AND c.open_wo_req_qty > c.qty_on_hand)
+ORDER BY
+    CASE WHEN (c.qty_on_hand + c.open_po_qty + c.planned_qty - c.open_wo_req_qty) < 0
+              AND c.open_so_value_at_risk > 0 THEN 1
+         WHEN (c.qty_on_hand + c.open_po_qty + c.planned_qty - c.open_wo_req_qty) < 0 THEN 2
+         ELSE 3 END,
+    c.open_so_value_at_risk DESC, c.PART_ID;
+        ]]></CommandText>
+        <QueryParameters><QueryParameter Name="@Site"><Value>=Parameters!Site.Value</Value></QueryParameter></QueryParameters>
+        <rd:UseGenericDesigner>true</rd:UseGenericDesigner>
+      </Query>
+      <Fields>
+        <Field Name="SITE_ID"><DataField>SITE_ID</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="PART_ID"><DataField>PART_ID</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="DESCRIPTION"><DataField>DESCRIPTION</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="BUYER_USER_ID"><DataField>BUYER_USER_ID</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="STOCK_UM"><DataField>STOCK_UM</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="qty_on_hand"><DataField>qty_on_hand</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="open_wos"><DataField>open_wos</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="open_wo_req_qty"><DataField>open_wo_req_qty</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="earliest_required_date"><DataField>earliest_required_date</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
+        <Field Name="open_po_qty"><DataField>open_po_qty</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="earliest_po_recv_date"><DataField>earliest_po_recv_date</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
+        <Field Name="shortage_qty"><DataField>shortage_qty</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="shortage_value_at_std"><DataField>shortage_value_at_std</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="po_recv_vs_required_gap_days"><DataField>po_recv_vs_required_gap_days</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="open_so_qty"><DataField>open_so_qty</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="open_so_value_at_risk"><DataField>open_so_value_at_risk</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="status"><DataField>status</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+  </DataSets>
+  <ReportParameters>
+    <ReportParameter Name="Site"><DataType>String</DataType><Nullable>true</Nullable><AllowBlank>true</AllowBlank><DefaultValue><Values><Value xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" /></Values></DefaultValue><Prompt>Site (blank = all)</Prompt></ReportParameter>
+  </ReportParameters>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <ReportItems>
+          <Textbox Name="txtTitle"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Material Shortage Expedite List</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>16pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph></Paragraphs><Top>0in</Top><Left>0in</Left><Height>0.3in</Height><Width>8in</Width><ZIndex>1</ZIndex><Style /></Textbox>
+          <Textbox Name="txtSubtitle"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=IIF(Parameters!Site.Value Is Nothing Or Parameters!Site.Value = "", "All Sites", "Site: " &amp; Parameters!Site.Value) &amp; "  |  Generated: " &amp; Format(Now(), "yyyy-MM-dd HH:mm")</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>10pt</FontSize><Color>#555555</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Top>0.3in</Top><Left>0in</Left><Height>0.25in</Height><Width>15in</Width><ZIndex>2</ZIndex><Style /></Textbox>
+          <Tablix Name="tblxShortage">
+            <TablixBody>
+              <TablixColumns>
+                <TablixColumn><Width>1.8in</Width></TablixColumn><!-- STATUS -->
+                <TablixColumn><Width>0.5in</Width></TablixColumn><!-- SITE -->
+                <TablixColumn><Width>1.4in</Width></TablixColumn><!-- PART -->
+                <TablixColumn><Width>2.0in</Width></TablixColumn><!-- DESC -->
+                <TablixColumn><Width>0.9in</Width></TablixColumn><!-- BUYER -->
+                <TablixColumn><Width>0.7in</Width></TablixColumn><!-- ON HAND -->
+                <TablixColumn><Width>0.7in</Width></TablixColumn><!-- SHORTAGE -->
+                <TablixColumn><Width>0.9in</Width></TablixColumn><!-- WO NEED DATE -->
+                <TablixColumn><Width>0.9in</Width></TablixColumn><!-- PO ARRIVAL -->
+                <TablixColumn><Width>0.6in</Width></TablixColumn><!-- GAP DAYS -->
+                <TablixColumn><Width>1.0in</Width></TablixColumn><!-- SHORTAGE $ -->
+                <TablixColumn><Width>1.0in</Width></TablixColumn><!-- SO $ AT RISK -->
+              </TablixColumns>
+              <TablixRows>
+                <TablixRow><Height>0.3in</Height><TablixCells>
+                  <TablixCell><CellContents><Textbox Name="hStatus"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Status</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hSite"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Site</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hPart"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Part</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hDesc"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Description</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hBuyer"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Buyer</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hOH"><Paragraphs><Paragraph><TextRuns><TextRun><Value>On Hand</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hShort"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Short By</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hNeed"><Paragraphs><Paragraph><TextRuns><TextRun><Value>WO Need</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hPO"><Paragraphs><Paragraph><TextRuns><TextRun><Value>PO Arrives</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hGap"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Gap</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hSV"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Shortage $</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hSO"><Paragraphs><Paragraph><TextRuns><TextRun><Value>SO $ At Risk</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                </TablixCells></TablixRow>
+                <TablixRow><Height>0.22in</Height><TablixCells>
+                  <TablixCell><CellContents><Textbox Name="dStatus"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!status.Value</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><BackgroundColor>=Switch(Fields!status.Value="CRITICAL - short + SO demand","#FFCCCC", Fields!status.Value="SHORT","#FFE5B4", Fields!status.Value="PO LATE FOR NEED","#FFF8C4", Fields!status.Value="NO COVERAGE PLANNED","#FFE5B4", true, "White")</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dSite"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!SITE_ID.Value</Value><Style><FontFamily>Segoe UI</FontFamily></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dPart"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!PART_ID.Value</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dDesc"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!DESCRIPTION.Value</Value><Style><FontFamily>Segoe UI</FontFamily></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dBuyer"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!BUYER_USER_ID.Value</Value><Style><FontFamily>Segoe UI</FontFamily></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dOH"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!qty_on_hand.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N0</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dShort"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!shortage_qty.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N0</Format><FontWeight>Bold</FontWeight><Color>=IIF(Fields!shortage_qty.Value &gt; 0,"Red","Black")</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dNeed"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!earliest_required_date.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>yyyy-MM-dd</Format></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dPO"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!earliest_po_recv_date.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>yyyy-MM-dd</Format></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dGap"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!po_recv_vs_required_gap_days.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N0</Format><Color>=IIF(IsNothing(Fields!po_recv_vs_required_gap_days.Value), "Black", IIF(Fields!po_recv_vs_required_gap_days.Value &lt; 0, "Red", "Black"))</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dSV"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!shortage_value_at_std.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>C0</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dSO"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!open_so_value_at_risk.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>C0</Format><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                </TablixCells></TablixRow>
+              </TablixRows>
+            </TablixBody>
+            <TablixColumnHierarchy><TablixMembers><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /></TablixMembers></TablixColumnHierarchy>
+            <TablixRowHierarchy><TablixMembers><TablixMember><KeepWithGroup>After</KeepWithGroup><RepeatOnNewPage>true</RepeatOnNewPage></TablixMember><TablixMember><Group Name="Details" /></TablixMember></TablixMembers></TablixRowHierarchy>
+            <RepeatColumnHeaders>true</RepeatColumnHeaders>
+            <DataSetName>MaterialShortage</DataSetName>
+            <Top>0.7in</Top><Left>0in</Left><Height>0.52in</Height><Width>12.4in</Width><ZIndex>3</ZIndex>
+            <Style><Border><Style>None</Style></Border></Style>
+          </Tablix>
+        </ReportItems>
+        <Height>2in</Height><Style />
+      </Body>
+      <Width>13in</Width>
+      <Page>
+        <PageHeader><Height>0.4in</Height><PrintOnFirstPage>true</PrintOnFirstPage><PrintOnLastPage>true</PrintOnLastPage>
+          <ReportItems>
+            <Textbox Name="txtPageTitle"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Material Shortage Expedite</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>10pt</FontSize><FontWeight>Bold</FontWeight><Color>#555555</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Top>0.1in</Top><Left>0in</Left><Height>0.25in</Height><Width>5in</Width><ZIndex>0</ZIndex><Style /></Textbox>
+            <Textbox Name="txtPageNum"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Globals!PageNumber &amp; " of " &amp; Globals!TotalPages</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>9pt</FontSize><Color>#555555</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Top>0.1in</Top><Left>11in</Left><Height>0.25in</Height><Width>2in</Width><ZIndex>1</ZIndex><Style /></Textbox>
+          </ReportItems><Style />
+        </PageHeader>
+        <PageHeight>8.5in</PageHeight><PageWidth>14in</PageWidth>
+        <LeftMargin>0.5in</LeftMargin><RightMargin>0.5in</RightMargin>
+        <TopMargin>0.5in</TopMargin><BottomMargin>0.5in</BottomMargin>
+        <ColumnSpacing>0.13in</ColumnSpacing><Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <ReportID>e4f5a6b7-c8d9-0123-ef01-456789012345</ReportID>
+</Report>

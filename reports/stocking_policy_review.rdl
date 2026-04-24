@@ -1,0 +1,297 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+===============================================================================
+Report: Stocking Policy Review Worksheet
+File:   reports/stocking_policy_review.rdl
+Source: queries/domains/inventory/part_information/stocking_policy_recommendations.sql
+
+Purpose:
+    Quarterly worksheet: recommended SS / ROP from observed demand and
+    lead-time variability vs current ERP setting. Filter to action rows.
+
+Audience: Materials manager, planner.
+
+Parameters:
+    Site                  - blank = all
+    ServiceLevelZ         - default 1.65 (95% service)
+    DemandLookbackMonths  - default 12
+    LTLookbackMonths      - default 18
+    ActionFilter          - 'ALL' / 'INCREASE SS' / 'DECREASE SS' / 'NEW POLICY'
+===============================================================================
+-->
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2010/01/reportdefinition"
+        xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="VECA">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString>Data Source=YOUR_SERVER;Initial Catalog=VECA</ConnectString>
+        <IntegratedSecurity>true</IntegratedSecurity>
+      </ConnectionProperties>
+      <rd:SecurityType>Integrated</rd:SecurityType>
+      <rd:DataSourceID>6f4e2c8a-9d31-4b67-8a22-1e8f7c2d3e91</rd:DataSourceID>
+    </DataSource>
+  </DataSources>
+  <DataSets>
+    <DataSet Name="StockingPolicy">
+      <Query>
+        <DataSourceName>VECA</DataSourceName>
+        <CommandText><![CDATA[
+DECLARE @MinDemandObs        int = 4;
+DECLARE @MinLTObs            int = 2;
+DECLARE @SignificantDeltaPct decimal(6,2) = 50.0;
+DECLARE @SignificantDeltaQty decimal(20,4) = 5.0;
+
+;WITH issues AS (
+    SELECT it.SITE_ID, it.PART_ID,
+           DATEADD(month, DATEDIFF(month, 0, it.TRANSACTION_DATE), 0) AS YEAR_MONTH,
+           SUM(it.QTY) AS QTY
+    FROM INVENTORY_TRANS it
+    WHERE it.TYPE = 'O' AND it.PART_ID IS NOT NULL AND it.QTY > 0
+      AND it.TRANSACTION_DATE >= DATEADD(month, -@DemandLookbackMonths, GETDATE())
+      AND (@Site IS NULL OR @Site='' OR it.SITE_ID = @Site)
+    GROUP BY it.SITE_ID, it.PART_ID,
+             DATEADD(month, DATEDIFF(month, 0, it.TRANSACTION_DATE), 0)
+),
+demand_stats AS (
+    SELECT SITE_ID, PART_ID,
+           COUNT(*) AS DEMAND_MONTHS,
+           SUM(QTY) AS T_DEMAND_QTY,
+           CAST(AVG(CAST(QTY AS decimal(20,4))) AS decimal(20,4)) AS DEMAND_AVG_PER_MONTH,
+           CAST(STDEV(QTY) AS decimal(20,4)) AS DEMAND_STDDEV_PER_MONTH
+    FROM issues GROUP BY SITE_ID, PART_ID
+),
+lt_obs AS (
+    SELECT it.SITE_ID, it.PART_ID,
+           DATEDIFF(day, p.ORDER_DATE, it.TRANSACTION_DATE) AS LT_DAYS
+    FROM INVENTORY_TRANS it INNER JOIN PURCHASE_ORDER p ON p.ID = it.PURC_ORDER_ID
+    WHERE it.TYPE='I' AND it.CLASS='R' AND it.PURC_ORDER_ID IS NOT NULL
+      AND it.PART_ID IS NOT NULL AND p.ORDER_DATE IS NOT NULL AND it.QTY > 0
+      AND it.TRANSACTION_DATE >= DATEADD(month, -@LTLookbackMonths, GETDATE())
+      AND DATEDIFF(day, p.ORDER_DATE, it.TRANSACTION_DATE) BETWEEN 0 AND 365
+      AND (@Site IS NULL OR @Site='' OR it.SITE_ID = @Site)
+),
+lt_stats AS (
+    SELECT SITE_ID, PART_ID,
+           COUNT(*) AS LT_OBS,
+           CAST(AVG(CAST(LT_DAYS AS decimal(10,2))) AS decimal(10,2)) AS LT_AVG_DAYS,
+           CAST(STDEV(LT_DAYS) AS decimal(10,2)) AS LT_STDDEV_DAYS
+    FROM lt_obs GROUP BY SITE_ID, PART_ID
+),
+recommendations AS (
+    SELECT psv.SITE_ID, psv.PART_ID, psv.DESCRIPTION, psv.PRODUCT_CODE,
+           psv.STOCK_UM, psv.PLANNER_USER_ID, psv.BUYER_USER_ID, psv.ABC_CODE,
+           psv.UNIT_MATERIAL_COST,
+           psv.PLANNING_LEADTIME AS CURRENT_LT_DAYS,
+           psv.SAFETY_STOCK_QTY AS CURRENT_SS,
+           psv.ORDER_POINT AS CURRENT_ROP,
+           psv.QTY_ON_HAND AS CURRENT_ON_HAND,
+           ISNULL(ds.DEMAND_MONTHS, 0) AS DEMAND_MONTHS_OBSERVED,
+           ds.DEMAND_AVG_PER_MONTH, ds.DEMAND_STDDEV_PER_MONTH,
+           ISNULL(ls.LT_OBS, 0) AS LT_OBSERVED, ls.LT_AVG_DAYS, ls.LT_STDDEV_DAYS,
+           CAST(@ServiceLevelZ AS decimal(5,2)) AS SERVICE_Z,
+           CAST(CASE WHEN ds.DEMAND_AVG_PER_MONTH IS NULL OR ls.LT_AVG_DAYS IS NULL THEN NULL
+                ELSE @ServiceLevelZ * SQRT(
+                    (ls.LT_AVG_DAYS / 30.0) * ISNULL(ds.DEMAND_STDDEV_PER_MONTH, 0) * ISNULL(ds.DEMAND_STDDEV_PER_MONTH, 0)
+                    + ds.DEMAND_AVG_PER_MONTH * ds.DEMAND_AVG_PER_MONTH
+                      * ((ISNULL(ls.LT_STDDEV_DAYS, 0) / 30.0) * (ISNULL(ls.LT_STDDEV_DAYS, 0) / 30.0)))
+                END AS decimal(20,2)) AS RECOMMENDED_SS,
+           CAST(CASE WHEN ds.DEMAND_AVG_PER_MONTH IS NULL OR ls.LT_AVG_DAYS IS NULL THEN NULL
+                ELSE ds.DEMAND_AVG_PER_MONTH * (ls.LT_AVG_DAYS / 30.0)
+                     + @ServiceLevelZ * SQRT(
+                         (ls.LT_AVG_DAYS / 30.0) * ISNULL(ds.DEMAND_STDDEV_PER_MONTH, 0) * ISNULL(ds.DEMAND_STDDEV_PER_MONTH, 0)
+                         + ds.DEMAND_AVG_PER_MONTH * ds.DEMAND_AVG_PER_MONTH
+                           * ((ISNULL(ls.LT_STDDEV_DAYS, 0) / 30.0) * (ISNULL(ls.LT_STDDEV_DAYS, 0) / 30.0)))
+                END AS decimal(20,2)) AS RECOMMENDED_ROP
+    FROM PART_SITE_VIEW psv
+    LEFT JOIN demand_stats ds ON ds.SITE_ID=psv.SITE_ID AND ds.PART_ID=psv.PART_ID
+    LEFT JOIN lt_stats ls ON ls.SITE_ID=psv.SITE_ID AND ls.PART_ID=psv.PART_ID
+    WHERE (@Site IS NULL OR @Site='' OR psv.SITE_ID = @Site)
+      AND psv.PURCHASED = 'Y'
+      AND ISNULL(psv.STATUS, '') NOT IN ('I')
+      AND (ISNULL(ds.DEMAND_MONTHS, 0) >= @MinDemandObs
+           OR ISNULL(psv.SAFETY_STOCK_QTY, 0) > 0)
+)
+SELECT r.SITE_ID, r.PART_ID, r.DESCRIPTION, r.PRODUCT_CODE, r.STOCK_UM,
+       r.PLANNER_USER_ID, r.BUYER_USER_ID, r.ABC_CODE,
+       r.CURRENT_LT_DAYS, r.CURRENT_SS, r.CURRENT_ROP, r.CURRENT_ON_HAND,
+       r.DEMAND_MONTHS_OBSERVED, r.DEMAND_AVG_PER_MONTH, r.DEMAND_STDDEV_PER_MONTH,
+       r.LT_OBSERVED, r.LT_AVG_DAYS, r.LT_STDDEV_DAYS,
+       r.RECOMMENDED_SS, r.RECOMMENDED_ROP,
+       CAST(r.RECOMMENDED_SS - ISNULL(r.CURRENT_SS,0) AS decimal(20,2)) AS SS_DELTA,
+       CAST(ISNULL(r.UNIT_MATERIAL_COST, 0)
+            * (r.RECOMMENDED_SS - ISNULL(r.CURRENT_SS,0)) AS decimal(23,2)) AS SS_DELTA_VALUE_AT_STD,
+       CAST(CASE WHEN r.DEMAND_AVG_PER_MONTH IS NULL OR r.DEMAND_AVG_PER_MONTH = 0 THEN NULL
+                 ELSE 100.0 * r.DEMAND_STDDEV_PER_MONTH / r.DEMAND_AVG_PER_MONTH
+            END AS decimal(10,2)) AS DEMAND_CV_PCT,
+       CASE WHEN ISNULL(r.DEMAND_MONTHS_OBSERVED, 0) < @MinDemandObs
+              OR ISNULL(r.LT_OBSERVED, 0) < @MinLTObs THEN 'NO HISTORY'
+            WHEN ISNULL(r.CURRENT_SS, 0) = 0 AND r.RECOMMENDED_SS > 0 THEN 'NEW POLICY'
+            WHEN ABS(r.RECOMMENDED_SS - r.CURRENT_SS) < @SignificantDeltaQty THEN 'OK'
+            WHEN r.RECOMMENDED_SS > r.CURRENT_SS * (1 + @SignificantDeltaPct/100.0) THEN 'INCREASE SS'
+            WHEN r.RECOMMENDED_SS < r.CURRENT_SS * (1 - @SignificantDeltaPct/100.0) THEN 'DECREASE SS'
+            ELSE 'OK' END AS POLICY_ACTION
+FROM recommendations r
+WHERE @ActionFilter = 'ALL'
+   OR @ActionFilter = (
+        CASE WHEN ISNULL(r.DEMAND_MONTHS_OBSERVED, 0) < @MinDemandObs
+              OR ISNULL(r.LT_OBSERVED, 0) < @MinLTObs THEN 'NO HISTORY'
+             WHEN ISNULL(r.CURRENT_SS, 0) = 0 AND r.RECOMMENDED_SS > 0 THEN 'NEW POLICY'
+             WHEN ABS(r.RECOMMENDED_SS - r.CURRENT_SS) < @SignificantDeltaQty THEN 'OK'
+             WHEN r.RECOMMENDED_SS > r.CURRENT_SS * (1 + @SignificantDeltaPct/100.0) THEN 'INCREASE SS'
+             WHEN r.RECOMMENDED_SS < r.CURRENT_SS * (1 - @SignificantDeltaPct/100.0) THEN 'DECREASE SS'
+             ELSE 'OK' END
+   )
+ORDER BY
+    CASE WHEN ISNULL(r.DEMAND_MONTHS_OBSERVED, 0) < @MinDemandObs
+          OR ISNULL(r.LT_OBSERVED, 0) < @MinLTObs THEN 4
+         WHEN ISNULL(r.CURRENT_SS, 0) = 0 AND r.RECOMMENDED_SS > 0 THEN 1
+         WHEN r.RECOMMENDED_SS > r.CURRENT_SS * (1 + @SignificantDeltaPct/100.0) THEN 2
+         WHEN r.CURRENT_SS > 0
+           AND r.RECOMMENDED_SS < r.CURRENT_SS * (1 - @SignificantDeltaPct/100.0) THEN 3
+         ELSE 5 END,
+    r.SITE_ID, r.PART_ID;
+        ]]></CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@Site"><Value>=Parameters!Site.Value</Value></QueryParameter>
+          <QueryParameter Name="@ServiceLevelZ"><Value>=Parameters!ServiceLevelZ.Value</Value></QueryParameter>
+          <QueryParameter Name="@DemandLookbackMonths"><Value>=Parameters!DemandLookbackMonths.Value</Value></QueryParameter>
+          <QueryParameter Name="@LTLookbackMonths"><Value>=Parameters!LTLookbackMonths.Value</Value></QueryParameter>
+          <QueryParameter Name="@ActionFilter"><Value>=Parameters!ActionFilter.Value</Value></QueryParameter>
+        </QueryParameters>
+        <rd:UseGenericDesigner>true</rd:UseGenericDesigner>
+      </Query>
+      <Fields>
+        <Field Name="SITE_ID"><DataField>SITE_ID</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="PART_ID"><DataField>PART_ID</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="DESCRIPTION"><DataField>DESCRIPTION</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="STOCK_UM"><DataField>STOCK_UM</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="ABC_CODE"><DataField>ABC_CODE</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="CURRENT_LT_DAYS"><DataField>CURRENT_LT_DAYS</DataField><rd:TypeName>System.Int16</rd:TypeName></Field>
+        <Field Name="CURRENT_SS"><DataField>CURRENT_SS</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="CURRENT_ROP"><DataField>CURRENT_ROP</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="CURRENT_ON_HAND"><DataField>CURRENT_ON_HAND</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="DEMAND_MONTHS_OBSERVED"><DataField>DEMAND_MONTHS_OBSERVED</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="DEMAND_AVG_PER_MONTH"><DataField>DEMAND_AVG_PER_MONTH</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="DEMAND_CV_PCT"><DataField>DEMAND_CV_PCT</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="LT_OBSERVED"><DataField>LT_OBSERVED</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="LT_AVG_DAYS"><DataField>LT_AVG_DAYS</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="LT_STDDEV_DAYS"><DataField>LT_STDDEV_DAYS</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="RECOMMENDED_SS"><DataField>RECOMMENDED_SS</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="RECOMMENDED_ROP"><DataField>RECOMMENDED_ROP</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="SS_DELTA"><DataField>SS_DELTA</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="SS_DELTA_VALUE_AT_STD"><DataField>SS_DELTA_VALUE_AT_STD</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="POLICY_ACTION"><DataField>POLICY_ACTION</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+  </DataSets>
+  <ReportParameters>
+    <ReportParameter Name="Site"><DataType>String</DataType><Nullable>true</Nullable><AllowBlank>true</AllowBlank><DefaultValue><Values><Value xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" /></Values></DefaultValue><Prompt>Site (blank = all)</Prompt></ReportParameter>
+    <ReportParameter Name="ServiceLevelZ"><DataType>Float</DataType><Nullable>false</Nullable><DefaultValue><Values><Value>1.65</Value></Values></DefaultValue><Prompt>Service Level Z (1.28=90%, 1.65=95%, 2.33=99%)</Prompt></ReportParameter>
+    <ReportParameter Name="DemandLookbackMonths"><DataType>Integer</DataType><Nullable>false</Nullable><DefaultValue><Values><Value>12</Value></Values></DefaultValue><Prompt>Demand Lookback (months)</Prompt></ReportParameter>
+    <ReportParameter Name="LTLookbackMonths"><DataType>Integer</DataType><Nullable>false</Nullable><DefaultValue><Values><Value>18</Value></Values></DefaultValue><Prompt>Lead Time Lookback (months)</Prompt></ReportParameter>
+    <ReportParameter Name="ActionFilter"><DataType>String</DataType><Nullable>false</Nullable><DefaultValue><Values><Value>ALL</Value></Values></DefaultValue><Prompt>Action Filter</Prompt><ValidValues><ParameterValues><ParameterValue><Value>ALL</Value><Label>All</Label></ParameterValue><ParameterValue><Value>INCREASE SS</Value><Label>Increase SS</Label></ParameterValue><ParameterValue><Value>DECREASE SS</Value><Label>Decrease SS</Label></ParameterValue><ParameterValue><Value>NEW POLICY</Value><Label>New Policy</Label></ParameterValue><ParameterValue><Value>OK</Value><Label>OK</Label></ParameterValue><ParameterValue><Value>NO HISTORY</Value><Label>No History</Label></ParameterValue></ParameterValues></ValidValues></ReportParameter>
+  </ReportParameters>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <ReportItems>
+          <Textbox Name="txtTitle"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Stocking Policy Review Worksheet</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>16pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph></Paragraphs><Top>0in</Top><Left>0in</Left><Height>0.3in</Height><Width>8in</Width><ZIndex>1</ZIndex><Style /></Textbox>
+          <Textbox Name="txtSubtitle"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=IIF(Parameters!Site.Value Is Nothing Or Parameters!Site.Value = "", "All Sites", "Site: " &amp; Parameters!Site.Value) &amp; "  |  Z: " &amp; Parameters!ServiceLevelZ.Value &amp; "  |  Action filter: " &amp; Parameters!ActionFilter.Value &amp; "  |  Generated: " &amp; Format(Now(), "yyyy-MM-dd HH:mm")</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>10pt</FontSize><Color>#555555</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Top>0.3in</Top><Left>0in</Left><Height>0.25in</Height><Width>15in</Width><ZIndex>2</ZIndex><Style /></Textbox>
+          <Tablix Name="tblxSP">
+            <TablixBody>
+              <TablixColumns>
+                <TablixColumn><Width>1.4in</Width></TablixColumn>
+                <TablixColumn><Width>0.5in</Width></TablixColumn>
+                <TablixColumn><Width>1.4in</Width></TablixColumn>
+                <TablixColumn><Width>2.0in</Width></TablixColumn>
+                <TablixColumn><Width>0.5in</Width></TablixColumn>
+                <TablixColumn><Width>0.7in</Width></TablixColumn>
+                <TablixColumn><Width>0.7in</Width></TablixColumn>
+                <TablixColumn><Width>0.7in</Width></TablixColumn>
+                <TablixColumn><Width>0.7in</Width></TablixColumn>
+                <TablixColumn><Width>0.7in</Width></TablixColumn>
+                <TablixColumn><Width>0.7in</Width></TablixColumn>
+                <TablixColumn><Width>0.8in</Width></TablixColumn>
+                <TablixColumn><Width>1.0in</Width></TablixColumn>
+                <TablixColumn><Width>1.1in</Width></TablixColumn>
+              </TablixColumns>
+              <TablixRows>
+                <TablixRow><Height>0.3in</Height><TablixCells>
+                  <TablixCell><CellContents><Textbox Name="hAct"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Action</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hSite"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Site</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hPart"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Part</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hDesc"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Description</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hABC"><Paragraphs><Paragraph><TextRuns><TextRun><Value>ABC</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hOH"><Paragraphs><Paragraph><TextRuns><TextRun><Value>On Hand</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hCurSS"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Current SS</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hRecSS"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Rec SS</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hRecROP"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Rec ROP</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hDmd"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Avg/Mo</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hCV"><Paragraphs><Paragraph><TextRuns><TextRun><Value>CV%</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hLT"><Paragraphs><Paragraph><TextRuns><TextRun><Value>LT (d)</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hDel"><Paragraphs><Paragraph><TextRuns><TextRun><Value>SS Delta</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hDelV"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Delta $</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                </TablixCells></TablixRow>
+                <TablixRow><Height>0.22in</Height><TablixCells>
+                  <TablixCell><CellContents><Textbox Name="dAct"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!POLICY_ACTION.Value</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><BackgroundColor>=Switch(Fields!POLICY_ACTION.Value="INCREASE SS","#FFE5B4", Fields!POLICY_ACTION.Value="DECREASE SS","#CCFFFF", Fields!POLICY_ACTION.Value="NEW POLICY","#FFCCCC", Fields!POLICY_ACTION.Value="NO HISTORY","#E7E6E6", true, "White")</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dSite"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!SITE_ID.Value</Value><Style><FontFamily>Segoe UI</FontFamily></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dPart"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!PART_ID.Value</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dDesc"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!DESCRIPTION.Value</Value><Style><FontFamily>Segoe UI</FontFamily></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dABC"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!ABC_CODE.Value</Value><Style><FontFamily>Segoe UI</FontFamily></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dOH"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!CURRENT_ON_HAND.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N0</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dCurSS"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!CURRENT_SS.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N1</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dRecSS"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!RECOMMENDED_SS.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N1</Format><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dRecROP"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!RECOMMENDED_ROP.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N1</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dDmd"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!DEMAND_AVG_PER_MONTH.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N1</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dCV"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!DEMAND_CV_PCT.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N0</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dLT"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!LT_AVG_DAYS.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N0</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dDel"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!SS_DELTA.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N1</Format><FontWeight>Bold</FontWeight><Color>=IIF(IsNothing(Fields!SS_DELTA.Value), "Black", IIF(Fields!SS_DELTA.Value &gt; 0, "DarkOrange", IIF(Fields!SS_DELTA.Value &lt; 0, "DarkBlue", "Black")))</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dDelV"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!SS_DELTA_VALUE_AT_STD.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>C0</Format><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                </TablixCells></TablixRow>
+                <TablixRow><Height>0.3in</Height><TablixCells>
+                  <TablixCell><CellContents><Textbox Name="fLabel"><Paragraphs><Paragraph><TextRuns><TextRun><Value>NET DELTA $</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fX1"><Paragraphs><Paragraph /></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fX2"><Paragraphs><Paragraph /></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fX3"><Paragraphs><Paragraph /></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fX4"><Paragraphs><Paragraph /></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fX5"><Paragraphs><Paragraph /></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fX6"><Paragraphs><Paragraph /></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fX7"><Paragraphs><Paragraph /></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fX8"><Paragraphs><Paragraph /></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fX9"><Paragraphs><Paragraph /></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fX10"><Paragraphs><Paragraph /></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fX11"><Paragraphs><Paragraph /></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fX12"><Paragraphs><Paragraph /></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fNet"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Sum(Fields!SS_DELTA_VALUE_AT_STD.Value)</Value><Style><FontFamily>Segoe UI</FontFamily><Format>C0</Format><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                </TablixCells></TablixRow>
+              </TablixRows>
+            </TablixBody>
+            <TablixColumnHierarchy><TablixMembers><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /></TablixMembers></TablixColumnHierarchy>
+            <TablixRowHierarchy><TablixMembers><TablixMember><KeepWithGroup>After</KeepWithGroup><RepeatOnNewPage>true</RepeatOnNewPage></TablixMember><TablixMember><Group Name="Details" /></TablixMember><TablixMember><KeepWithGroup>Before</KeepWithGroup></TablixMember></TablixMembers></TablixRowHierarchy>
+            <RepeatColumnHeaders>true</RepeatColumnHeaders>
+            <DataSetName>StockingPolicy</DataSetName>
+            <Top>0.7in</Top><Left>0in</Left><Height>0.82in</Height><Width>13.0in</Width><ZIndex>3</ZIndex>
+            <Style><Border><Style>None</Style></Border></Style>
+          </Tablix>
+        </ReportItems>
+        <Height>2in</Height><Style />
+      </Body>
+      <Width>14in</Width>
+      <Page>
+        <PageHeader><Height>0.4in</Height><PrintOnFirstPage>true</PrintOnFirstPage><PrintOnLastPage>true</PrintOnLastPage>
+          <ReportItems>
+            <Textbox Name="txtPageTitle"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Stocking Policy Review</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>10pt</FontSize><FontWeight>Bold</FontWeight><Color>#555555</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Top>0.1in</Top><Left>0in</Left><Height>0.25in</Height><Width>5in</Width><ZIndex>0</ZIndex><Style /></Textbox>
+            <Textbox Name="txtPageNum"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Globals!PageNumber &amp; " of " &amp; Globals!TotalPages</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>9pt</FontSize><Color>#555555</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Top>0.1in</Top><Left>11in</Left><Height>0.25in</Height><Width>2in</Width><ZIndex>1</ZIndex><Style /></Textbox>
+          </ReportItems><Style />
+        </PageHeader>
+        <PageHeight>8.5in</PageHeight><PageWidth>14in</PageWidth>
+        <LeftMargin>0.5in</LeftMargin><RightMargin>0.5in</RightMargin>
+        <TopMargin>0.5in</TopMargin><BottomMargin>0.5in</BottomMargin>
+        <ColumnSpacing>0.13in</ColumnSpacing><Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <ReportID>f1a2b3c4-d5e6-7890-5678-123456789012</ReportID>
+</Report>

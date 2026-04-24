@@ -1,0 +1,323 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+===============================================================================
+Report: SO Fulfillment Risk
+File:   reports/so_fulfillment_risk.rdl
+Source: queries/domains/sales/order_information/so_fulfillment_risk.sql
+
+Purpose:
+    For an open SO line, surface specific blocking components and the
+    next inbound supply that would unblock them. CSR/sales tool.
+
+Audience: CSR, sales rep, planner.
+
+Parameters:
+    Site         - blank = all
+    Customer     - blank = all
+    CustOrderID  - blank = all
+===============================================================================
+-->
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2010/01/reportdefinition"
+        xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="VECA">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString>Data Source=YOUR_SERVER;Initial Catalog=VECA</ConnectString>
+        <IntegratedSecurity>true</IntegratedSecurity>
+      </ConnectionProperties>
+      <rd:SecurityType>Integrated</rd:SecurityType>
+      <rd:DataSourceID>6f4e2c8a-9d31-4b67-8a22-1e8f7c2d3e91</rd:DataSourceID>
+    </DataSource>
+  </DataSources>
+  <DataSets>
+    <DataSet Name="SOFulfillmentRisk">
+      <Query>
+        <DataSourceName>VECA</DataSourceName>
+        <CommandText><![CDATA[
+DECLARE @MaxDepth int = 20;
+
+;WITH
+open_so AS (
+    SELECT col.SITE_ID, col.CUST_ORDER_ID, col.LINE_NO, col.PART_ID,
+           co.CUSTOMER_ID, cust.NAME AS CUSTOMER_NAME,
+           col.ORDER_QTY, col.TOTAL_SHIPPED_QTY,
+           col.ORDER_QTY - col.TOTAL_SHIPPED_QTY AS OPEN_QTY,
+           col.UNIT_PRICE,
+           (col.ORDER_QTY - col.TOTAL_SHIPPED_QTY) * col.UNIT_PRICE AS LINE_OPEN_VALUE,
+           COALESCE(col.PROMISE_DATE, col.DESIRED_SHIP_DATE, co.DESIRED_SHIP_DATE) AS NEED_DATE
+    FROM CUST_ORDER_LINE col
+    INNER JOIN CUSTOMER_ORDER co ON co.ID = col.CUST_ORDER_ID
+    LEFT JOIN CUSTOMER cust ON cust.ID = co.CUSTOMER_ID
+    WHERE co.STATUS IN ('R','F') AND col.LINE_STATUS='A'
+      AND col.ORDER_QTY > col.TOTAL_SHIPPED_QTY AND col.PART_ID IS NOT NULL
+      AND (@Site IS NULL OR @Site='' OR col.SITE_ID = @Site)
+      AND (@Customer IS NULL OR @Customer='' OR co.CUSTOMER_ID = @Customer)
+      AND (@CustOrderID IS NULL OR @CustOrderID='' OR col.CUST_ORDER_ID = @CustOrderID)
+),
+bom AS (
+    SELECT CAST(0 AS int) AS BOM_LEVEL, s.SITE_ID, s.CUST_ORDER_ID, s.LINE_NO,
+           s.PART_ID AS COMPONENT_PART_ID, CAST(1 AS decimal(28,8)) AS QTY_PER_ASSEMBLY,
+           CAST('/' + s.PART_ID + '/' AS nvarchar(4000)) AS PATH
+    FROM open_so s
+    UNION ALL
+    SELECT parent.BOM_LEVEL + 1, parent.SITE_ID, parent.CUST_ORDER_ID, parent.LINE_NO, rq.PART_ID,
+           CAST(parent.QTY_PER_ASSEMBLY * (rq.CALC_QTY / NULLIF(wo.DESIRED_QTY,0)) AS decimal(28,8)),
+           CAST(parent.PATH + rq.PART_ID + '/' AS nvarchar(4000))
+    FROM bom parent
+    JOIN PART_SITE_VIEW psv ON psv.PART_ID=parent.COMPONENT_PART_ID AND psv.SITE_ID=parent.SITE_ID
+         AND psv.FABRICATED='Y' AND psv.ENGINEERING_MSTR IS NOT NULL
+    JOIN WORK_ORDER wo ON wo.TYPE='M' AND wo.BASE_ID=psv.PART_ID
+         AND wo.LOT_ID=CAST(psv.ENGINEERING_MSTR AS nvarchar(3))
+         AND wo.SPLIT_ID='0' AND wo.SUB_ID='0' AND wo.SITE_ID=psv.SITE_ID
+    JOIN REQUIREMENT rq ON rq.WORKORDER_TYPE=wo.TYPE AND rq.WORKORDER_BASE_ID=wo.BASE_ID
+         AND rq.WORKORDER_LOT_ID=wo.LOT_ID AND rq.WORKORDER_SPLIT_ID=wo.SPLIT_ID
+         AND rq.WORKORDER_SUB_ID=wo.SUB_ID
+    WHERE rq.PART_ID IS NOT NULL AND rq.STATUS='U'
+      AND parent.BOM_LEVEL < @MaxDepth
+      AND CHARINDEX('/' + rq.PART_ID + '/', parent.PATH) = 0
+),
+component_demand AS (
+    SELECT b.SITE_ID, b.CUST_ORDER_ID, b.LINE_NO, b.COMPONENT_PART_ID,
+           SUM(b.QTY_PER_ASSEMBLY) AS QTY_PER_ASSEMBLY,
+           SUM(b.QTY_PER_ASSEMBLY) * MAX(s.OPEN_QTY) AS DEMAND_QTY
+    FROM bom b
+    JOIN open_so s ON s.SITE_ID=b.SITE_ID AND s.CUST_ORDER_ID=b.CUST_ORDER_ID AND s.LINE_NO=b.LINE_NO
+    WHERE b.BOM_LEVEL >= 1
+    GROUP BY b.SITE_ID, b.CUST_ORDER_ID, b.LINE_NO, b.COMPONENT_PART_ID
+),
+po_next AS (
+    SELECT p.SITE_ID, pl.PART_ID,
+           MIN(COALESCE(pl.DESIRED_RECV_DATE, p.DESIRED_RECV_DATE)) AS NEXT_DATE,
+           SUM(pl.ORDER_QTY - pl.TOTAL_RECEIVED_QTY) AS TOTAL_OPEN_QTY
+    FROM PURCHASE_ORDER p INNER JOIN PURC_ORDER_LINE pl ON pl.PURC_ORDER_ID = p.ID
+    WHERE ISNULL(p.STATUS,'') NOT IN ('X','C')
+      AND ISNULL(pl.LINE_STATUS,'') NOT IN ('X','C')
+      AND pl.PART_ID IS NOT NULL AND pl.ORDER_QTY > pl.TOTAL_RECEIVED_QTY
+      AND (@Site IS NULL OR @Site='' OR p.SITE_ID = @Site)
+    GROUP BY p.SITE_ID, pl.PART_ID
+),
+po_next_ref AS (
+    SELECT p.SITE_ID, pl.PART_ID,
+           MIN(p.ID + '/' + CAST(pl.LINE_NO AS nvarchar(10))) AS NEXT_REF
+    FROM PURCHASE_ORDER p
+    INNER JOIN PURC_ORDER_LINE pl ON pl.PURC_ORDER_ID = p.ID
+    INNER JOIN po_next pn ON pn.SITE_ID = p.SITE_ID AND pn.PART_ID = pl.PART_ID
+       AND COALESCE(pl.DESIRED_RECV_DATE, p.DESIRED_RECV_DATE) = pn.NEXT_DATE
+    WHERE ISNULL(p.STATUS,'') NOT IN ('X','C')
+      AND ISNULL(pl.LINE_STATUS,'') NOT IN ('X','C')
+      AND pl.PART_ID IS NOT NULL AND pl.ORDER_QTY > pl.TOTAL_RECEIVED_QTY
+    GROUP BY p.SITE_ID, pl.PART_ID
+),
+wo_next AS (
+    SELECT wo.SITE_ID, wo.PART_ID,
+           MIN(COALESCE(wo.SCHED_FINISH_DATE, wo.DESIRED_WANT_DATE)) AS NEXT_DATE,
+           SUM(wo.DESIRED_QTY - wo.RECEIVED_QTY) AS TOTAL_OPEN_QTY
+    FROM WORK_ORDER wo
+    WHERE wo.TYPE='W' AND ISNULL(wo.STATUS,'') NOT IN ('X','C')
+      AND wo.DESIRED_QTY > wo.RECEIVED_QTY AND wo.PART_ID IS NOT NULL
+      AND (@Site IS NULL OR @Site='' OR wo.SITE_ID = @Site)
+    GROUP BY wo.SITE_ID, wo.PART_ID
+),
+wo_next_ref AS (
+    SELECT wo.SITE_ID, wo.PART_ID,
+           MIN(wo.TYPE + '/' + wo.BASE_ID + '/' + wo.LOT_ID + '/' + wo.SPLIT_ID + '/' + wo.SUB_ID) AS NEXT_REF
+    FROM WORK_ORDER wo
+    INNER JOIN wo_next wn ON wn.SITE_ID = wo.SITE_ID AND wn.PART_ID = wo.PART_ID
+       AND COALESCE(wo.SCHED_FINISH_DATE, wo.DESIRED_WANT_DATE) = wn.NEXT_DATE
+    WHERE wo.TYPE='W' AND ISNULL(wo.STATUS,'') NOT IN ('X','C')
+      AND wo.DESIRED_QTY > wo.RECEIVED_QTY
+    GROUP BY wo.SITE_ID, wo.PART_ID
+),
+planned_next AS (
+    SELECT po.SITE_ID, po.PART_ID, MIN(po.WANT_DATE) AS NEXT_DATE,
+           SUM(po.ORDER_QTY) AS TOTAL_OPEN_QTY
+    FROM PLANNED_ORDER po
+    WHERE po.WANT_DATE IS NOT NULL
+      AND (@Site IS NULL OR @Site='' OR po.SITE_ID = @Site)
+    GROUP BY po.SITE_ID, po.PART_ID
+),
+next_supply AS (
+    SELECT SITE_ID, PART_ID, MIN(NEXT_DATE) AS NEXT_SUPPLY_DATE
+    FROM (SELECT SITE_ID, PART_ID, NEXT_DATE FROM po_next
+          UNION ALL SELECT SITE_ID, PART_ID, NEXT_DATE FROM wo_next
+          UNION ALL SELECT SITE_ID, PART_ID, NEXT_DATE FROM planned_next) u
+    WHERE NEXT_DATE IS NOT NULL
+    GROUP BY SITE_ID, PART_ID
+),
+next_supply_resolved AS (
+    SELECT ns.SITE_ID, ns.PART_ID, ns.NEXT_SUPPLY_DATE,
+           CASE WHEN po.NEXT_DATE = ns.NEXT_SUPPLY_DATE THEN 'PO'
+                WHEN wo.NEXT_DATE = ns.NEXT_SUPPLY_DATE THEN 'WO'
+                WHEN pl.NEXT_DATE = ns.NEXT_SUPPLY_DATE THEN 'PLANNED'
+                ELSE 'NONE' END AS NEXT_SUPPLY_TYPE,
+           CASE WHEN po.NEXT_DATE = ns.NEXT_SUPPLY_DATE THEN po.TOTAL_OPEN_QTY
+                WHEN wo.NEXT_DATE = ns.NEXT_SUPPLY_DATE THEN wo.TOTAL_OPEN_QTY
+                WHEN pl.NEXT_DATE = ns.NEXT_SUPPLY_DATE THEN pl.TOTAL_OPEN_QTY
+                ELSE 0 END AS NEXT_SUPPLY_QTY,
+           CASE WHEN po.NEXT_DATE = ns.NEXT_SUPPLY_DATE THEN por.NEXT_REF
+                WHEN wo.NEXT_DATE = ns.NEXT_SUPPLY_DATE THEN wor.NEXT_REF
+                WHEN pl.NEXT_DATE = ns.NEXT_SUPPLY_DATE THEN '(planned-order)'
+                ELSE NULL END AS NEXT_SUPPLY_REF
+    FROM next_supply ns
+    LEFT JOIN po_next po ON po.SITE_ID = ns.SITE_ID AND po.PART_ID = ns.PART_ID
+    LEFT JOIN po_next_ref por ON por.SITE_ID = ns.SITE_ID AND por.PART_ID = ns.PART_ID
+    LEFT JOIN wo_next wo ON wo.SITE_ID = ns.SITE_ID AND wo.PART_ID = ns.PART_ID
+    LEFT JOIN wo_next_ref wor ON wor.SITE_ID = ns.SITE_ID AND wor.PART_ID = ns.PART_ID
+    LEFT JOIN planned_next pl ON pl.SITE_ID = ns.SITE_ID AND pl.PART_ID = ns.PART_ID
+)
+SELECT s.SITE_ID, s.CUST_ORDER_ID, s.LINE_NO, s.PART_ID AS SO_PART_ID,
+       psv_top.DESCRIPTION AS SO_PART_DESC,
+       s.CUSTOMER_ID, s.CUSTOMER_NAME,
+       s.OPEN_QTY, s.UNIT_PRICE, s.LINE_OPEN_VALUE,
+       s.NEED_DATE,
+       CASE WHEN s.NEED_DATE < CAST(GETDATE() AS date)
+            THEN DATEDIFF(day, s.NEED_DATE, CAST(GETDATE() AS date)) ELSE 0 END AS DAYS_PAST_DUE,
+       cd.COMPONENT_PART_ID AS BLOCKING_COMPONENT_PART,
+       psv_c.DESCRIPTION AS COMPONENT_DESCRIPTION,
+       psv_c.PREF_VENDOR_ID AS COMP_PREF_VENDOR_ID,
+       psv_c.BUYER_USER_ID AS COMP_BUYER,
+       cd.QTY_PER_ASSEMBLY, cd.DEMAND_QTY AS DEMAND_FOR_LINE,
+       ISNULL(psv_c.QTY_ON_HAND, 0) AS COMPONENT_ON_HAND,
+       CAST(CASE WHEN cd.DEMAND_QTY > ISNULL(psv_c.QTY_ON_HAND, 0)
+                 THEN cd.DEMAND_QTY - ISNULL(psv_c.QTY_ON_HAND, 0) ELSE 0
+            END AS decimal(20,4)) AS QTY_SHORT_FOR_THIS_LINE,
+       nsr.NEXT_SUPPLY_TYPE, nsr.NEXT_SUPPLY_REF, nsr.NEXT_SUPPLY_DATE, nsr.NEXT_SUPPLY_QTY,
+       CASE WHEN cd.DEMAND_QTY <= ISNULL(psv_c.QTY_ON_HAND,0) THEN 'OK (NO SHORTAGE)'
+            WHEN nsr.NEXT_SUPPLY_TYPE = 'NONE' OR nsr.NEXT_SUPPLY_TYPE IS NULL THEN 'NO SUPPLY PLANNED'
+            WHEN nsr.NEXT_SUPPLY_QTY + ISNULL(psv_c.QTY_ON_HAND,0) >= cd.DEMAND_QTY THEN 'WILL UNBLOCK'
+            ELSE 'PARTIAL' END AS UNBLOCK_STATUS
+FROM open_so s
+INNER JOIN component_demand cd ON cd.SITE_ID=s.SITE_ID
+    AND cd.CUST_ORDER_ID=s.CUST_ORDER_ID AND cd.LINE_NO=s.LINE_NO
+LEFT JOIN PART_SITE_VIEW psv_top ON psv_top.SITE_ID=s.SITE_ID AND psv_top.PART_ID=s.PART_ID
+LEFT JOIN PART_SITE_VIEW psv_c ON psv_c.SITE_ID=cd.SITE_ID AND psv_c.PART_ID=cd.COMPONENT_PART_ID
+LEFT JOIN next_supply_resolved nsr ON nsr.SITE_ID=cd.SITE_ID AND nsr.PART_ID=cd.COMPONENT_PART_ID
+WHERE cd.DEMAND_QTY > ISNULL(psv_c.QTY_ON_HAND, 0)
+ORDER BY
+    CASE WHEN s.NEED_DATE < CAST(GETDATE() AS date) THEN 0 ELSE 1 END,
+    s.LINE_OPEN_VALUE DESC, s.CUST_ORDER_ID, s.LINE_NO, nsr.NEXT_SUPPLY_DATE DESC
+OPTION (MAXRECURSION 0);
+        ]]></CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@Site"><Value>=Parameters!Site.Value</Value></QueryParameter>
+          <QueryParameter Name="@Customer"><Value>=Parameters!Customer.Value</Value></QueryParameter>
+          <QueryParameter Name="@CustOrderID"><Value>=Parameters!CustOrderID.Value</Value></QueryParameter>
+        </QueryParameters>
+        <rd:UseGenericDesigner>true</rd:UseGenericDesigner>
+      </Query>
+      <Fields>
+        <Field Name="SITE_ID"><DataField>SITE_ID</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="CUST_ORDER_ID"><DataField>CUST_ORDER_ID</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="LINE_NO"><DataField>LINE_NO</DataField><rd:TypeName>System.Int16</rd:TypeName></Field>
+        <Field Name="SO_PART_ID"><DataField>SO_PART_ID</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="SO_PART_DESC"><DataField>SO_PART_DESC</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="CUSTOMER_NAME"><DataField>CUSTOMER_NAME</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="OPEN_QTY"><DataField>OPEN_QTY</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="LINE_OPEN_VALUE"><DataField>LINE_OPEN_VALUE</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="NEED_DATE"><DataField>NEED_DATE</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
+        <Field Name="DAYS_PAST_DUE"><DataField>DAYS_PAST_DUE</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="BLOCKING_COMPONENT_PART"><DataField>BLOCKING_COMPONENT_PART</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="COMPONENT_DESCRIPTION"><DataField>COMPONENT_DESCRIPTION</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="COMP_BUYER"><DataField>COMP_BUYER</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="QTY_PER_ASSEMBLY"><DataField>QTY_PER_ASSEMBLY</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="DEMAND_FOR_LINE"><DataField>DEMAND_FOR_LINE</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="COMPONENT_ON_HAND"><DataField>COMPONENT_ON_HAND</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="QTY_SHORT_FOR_THIS_LINE"><DataField>QTY_SHORT_FOR_THIS_LINE</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="NEXT_SUPPLY_TYPE"><DataField>NEXT_SUPPLY_TYPE</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="NEXT_SUPPLY_REF"><DataField>NEXT_SUPPLY_REF</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="NEXT_SUPPLY_DATE"><DataField>NEXT_SUPPLY_DATE</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
+        <Field Name="NEXT_SUPPLY_QTY"><DataField>NEXT_SUPPLY_QTY</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="UNBLOCK_STATUS"><DataField>UNBLOCK_STATUS</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+  </DataSets>
+  <ReportParameters>
+    <ReportParameter Name="Site"><DataType>String</DataType><Nullable>true</Nullable><AllowBlank>true</AllowBlank><DefaultValue><Values><Value xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" /></Values></DefaultValue><Prompt>Site (blank = all)</Prompt></ReportParameter>
+    <ReportParameter Name="Customer"><DataType>String</DataType><Nullable>true</Nullable><AllowBlank>true</AllowBlank><DefaultValue><Values><Value xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" /></Values></DefaultValue><Prompt>Customer ID (blank = all)</Prompt></ReportParameter>
+    <ReportParameter Name="CustOrderID"><DataType>String</DataType><Nullable>true</Nullable><AllowBlank>true</AllowBlank><DefaultValue><Values><Value xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" /></Values></DefaultValue><Prompt>SO # (blank = all)</Prompt></ReportParameter>
+  </ReportParameters>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <ReportItems>
+          <Textbox Name="txtTitle"><Paragraphs><Paragraph><TextRuns><TextRun><Value>SO Fulfillment Risk</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>16pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph></Paragraphs><Top>0in</Top><Left>0in</Left><Height>0.3in</Height><Width>6in</Width><ZIndex>1</ZIndex><Style /></Textbox>
+          <Textbox Name="txtSubtitle"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=IIF(Parameters!Site.Value Is Nothing Or Parameters!Site.Value = "", "All Sites", "Site: " &amp; Parameters!Site.Value) &amp; "  |  Customer: " &amp; IIF(Parameters!Customer.Value Is Nothing Or Parameters!Customer.Value = "", "All", Parameters!Customer.Value) &amp; "  |  SO: " &amp; IIF(Parameters!CustOrderID.Value Is Nothing Or Parameters!CustOrderID.Value = "", "All", Parameters!CustOrderID.Value)</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>10pt</FontSize><Color>#555555</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Top>0.3in</Top><Left>0in</Left><Height>0.25in</Height><Width>15in</Width><ZIndex>2</ZIndex><Style /></Textbox>
+          <Tablix Name="tblxRisk">
+            <TablixBody>
+              <TablixColumns>
+                <TablixColumn><Width>1.0in</Width></TablixColumn>
+                <TablixColumn><Width>0.5in</Width></TablixColumn>
+                <TablixColumn><Width>1.5in</Width></TablixColumn>
+                <TablixColumn><Width>1.4in</Width></TablixColumn>
+                <TablixColumn><Width>1.4in</Width></TablixColumn>
+                <TablixColumn><Width>1.7in</Width></TablixColumn>
+                <TablixColumn><Width>0.6in</Width></TablixColumn>
+                <TablixColumn><Width>0.6in</Width></TablixColumn>
+                <TablixColumn><Width>0.7in</Width></TablixColumn>
+                <TablixColumn><Width>0.7in</Width></TablixColumn>
+                <TablixColumn><Width>1.4in</Width></TablixColumn>
+                <TablixColumn><Width>0.9in</Width></TablixColumn>
+                <TablixColumn><Width>1.4in</Width></TablixColumn>
+              </TablixColumns>
+              <TablixRows>
+                <TablixRow><Height>0.3in</Height><TablixCells>
+                  <TablixCell><CellContents><Textbox Name="hStat"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Status</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hPD"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Past Due</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hSO"><Paragraphs><Paragraph><TextRuns><TextRun><Value>SO / Line</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hCust"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Customer</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hSOPart"><Paragraphs><Paragraph><TextRuns><TextRun><Value>SO Part</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hBlock"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Blocking Component</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hPer"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Per</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hOH"><Paragraphs><Paragraph><TextRuns><TextRun><Value>On Hand</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hShort"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Short</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hType"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Supply</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hRef"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Ref</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hDate"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Arrives</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hUnblock"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Unblock</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                </TablixCells></TablixRow>
+                <TablixRow><Height>0.22in</Height><TablixCells>
+                  <TablixCell><CellContents><Textbox Name="dStat"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!UNBLOCK_STATUS.Value</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><BackgroundColor>=Switch(Fields!UNBLOCK_STATUS.Value="WILL UNBLOCK","#CCFFCC", Fields!UNBLOCK_STATUS.Value="PARTIAL","#FFF8C4", Fields!UNBLOCK_STATUS.Value="NO SUPPLY PLANNED","#FFCCCC", true, "White")</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dPD"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!DAYS_PAST_DUE.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N0</Format><Color>=IIF(Fields!DAYS_PAST_DUE.Value &gt; 0,"Red","Black")</Color><FontWeight>=IIF(Fields!DAYS_PAST_DUE.Value &gt; 0,"Bold","Normal")</FontWeight></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dSO"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!CUST_ORDER_ID.Value &amp; " / " &amp; Fields!LINE_NO.Value</Value><Style><FontFamily>Consolas</FontFamily><FontSize>9pt</FontSize></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dCust"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!CUSTOMER_NAME.Value</Value><Style><FontFamily>Segoe UI</FontFamily></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dSOPart"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!SO_PART_ID.Value</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dBlock"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!BLOCKING_COMPONENT_PART.Value</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dPer"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!QTY_PER_ASSEMBLY.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N4</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dOH"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!COMPONENT_ON_HAND.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N0</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dShort"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!QTY_SHORT_FOR_THIS_LINE.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N0</Format><FontWeight>Bold</FontWeight><Color>Red</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dType"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!NEXT_SUPPLY_TYPE.Value</Value><Style><FontFamily>Segoe UI</FontFamily></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dRef"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!NEXT_SUPPLY_REF.Value</Value><Style><FontFamily>Consolas</FontFamily><FontSize>9pt</FontSize></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dDate"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!NEXT_SUPPLY_DATE.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>yyyy-MM-dd</Format></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dUnblock"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!UNBLOCK_STATUS.Value</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                </TablixCells></TablixRow>
+              </TablixRows>
+            </TablixBody>
+            <TablixColumnHierarchy><TablixMembers><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /></TablixMembers></TablixColumnHierarchy>
+            <TablixRowHierarchy><TablixMembers><TablixMember><KeepWithGroup>After</KeepWithGroup><RepeatOnNewPage>true</RepeatOnNewPage></TablixMember><TablixMember><Group Name="Details" /></TablixMember></TablixMembers></TablixRowHierarchy>
+            <RepeatColumnHeaders>true</RepeatColumnHeaders>
+            <DataSetName>SOFulfillmentRisk</DataSetName>
+            <Top>0.7in</Top><Left>0in</Left><Height>0.52in</Height><Width>13.8in</Width><ZIndex>3</ZIndex>
+            <Style><Border><Style>None</Style></Border></Style>
+          </Tablix>
+        </ReportItems>
+        <Height>2in</Height><Style />
+      </Body>
+      <Width>15in</Width>
+      <Page>
+        <PageHeader><Height>0.4in</Height><PrintOnFirstPage>true</PrintOnFirstPage><PrintOnLastPage>true</PrintOnLastPage>
+          <ReportItems>
+            <Textbox Name="txtPageTitle"><Paragraphs><Paragraph><TextRuns><TextRun><Value>SO Fulfillment Risk</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>10pt</FontSize><FontWeight>Bold</FontWeight><Color>#555555</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Top>0.1in</Top><Left>0in</Left><Height>0.25in</Height><Width>5in</Width><ZIndex>0</ZIndex><Style /></Textbox>
+            <Textbox Name="txtPageNum"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Globals!PageNumber &amp; " of " &amp; Globals!TotalPages</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>9pt</FontSize><Color>#555555</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Top>0.1in</Top><Left>13in</Left><Height>0.25in</Height><Width>2in</Width><ZIndex>1</ZIndex><Style /></Textbox>
+          </ReportItems><Style />
+        </PageHeader>
+        <PageHeight>8.5in</PageHeight><PageWidth>16in</PageWidth>
+        <LeftMargin>0.5in</LeftMargin><RightMargin>0.5in</RightMargin>
+        <TopMargin>0.5in</TopMargin><BottomMargin>0.5in</BottomMargin>
+        <ColumnSpacing>0.13in</ColumnSpacing><Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <ReportID>d9e0f1a2-b3c4-5678-3456-901234567890</ReportID>
+</Report>

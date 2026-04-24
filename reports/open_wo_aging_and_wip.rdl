@@ -1,0 +1,490 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+===============================================================================
+Report: Open Work Order Aging and WIP
+File:   reports/open_wo_aging_and_wip.rdl
+Source: queries/domains/production/performance/open_wo_aging_and_wip.sql
+
+Purpose:
+    Landscape-oriented SSRS report that renders the open-WO aging
+    snapshot. Prioritizes late WOs tied to open sales-order demand.
+
+Prerequisites:
+    1. Update the DataSource ConnectString below to point at your
+       SQL Server hosting the VECA database (currently "YOUR_SERVER").
+    2. Deploy to SSRS / Power BI Report Server, OR open in
+       Visual Studio (SSDT) / Report Builder to preview.
+
+Parameters:
+    Site       - optional, leave blank for all sites
+    AsOfDate   - defaults to today
+
+Notes:
+    - RDL 2010 schema. Compatible with SSRS 2012+ and Report Builder.
+    - Conditional row color: red background for P1, light red for P2,
+      yellow for P3.
+===============================================================================
+-->
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2010/01/reportdefinition"
+        xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="VECA">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString>Data Source=YOUR_SERVER;Initial Catalog=VECA</ConnectString>
+        <IntegratedSecurity>true</IntegratedSecurity>
+      </ConnectionProperties>
+      <rd:SecurityType>Integrated</rd:SecurityType>
+      <rd:DataSourceID>6f4e2c8a-9d31-4b67-8a22-1e8f7c2d3e91</rd:DataSourceID>
+    </DataSource>
+  </DataSources>
+  <DataSets>
+    <DataSet Name="OpenWOAging">
+      <Query>
+        <DataSourceName>VECA</DataSourceName>
+        <CommandText><![CDATA[
+;WITH open_wo AS (
+    SELECT
+        wo.SITE_ID,
+        wo.TYPE, wo.BASE_ID, wo.LOT_ID, wo.SPLIT_ID, wo.SUB_ID,
+        wo.PART_ID,
+        wo.PRODUCT_CODE,
+        wo.COMMODITY_CODE,
+        wo.WAREHOUSE_ID,
+        wo.STATUS,
+        wo.CREATE_DATE,
+        wo.DESIRED_RLS_DATE,
+        wo.DESIRED_WANT_DATE,
+        wo.SCHED_START_DATE,
+        wo.SCHED_FINISH_DATE,
+        wo.DESIRED_QTY,
+        wo.RECEIVED_QTY,
+        (wo.DESIRED_QTY - wo.RECEIVED_QTY)                        AS remaining_qty,
+        (wo.ACT_MATERIAL_COST + wo.ACT_LABOR_COST
+         + wo.ACT_BURDEN_COST + wo.ACT_SERVICE_COST)              AS act_total_cost,
+        (wo.REM_MATERIAL_COST + wo.REM_LABOR_COST
+         + wo.REM_BURDEN_COST + wo.REM_SERVICE_COST)              AS rem_cost_total,
+        (wo.EST_MATERIAL_COST + wo.EST_LABOR_COST
+         + wo.EST_BURDEN_COST + wo.EST_SERVICE_COST)              AS est_total_cost,
+        wo.WBS_CUST_ORDER_ID
+    FROM WORK_ORDER wo
+    WHERE wo.STATUS IN ('F','R')
+      AND wo.TYPE <> 'M'
+      AND (@Site IS NULL OR @Site = '' OR wo.SITE_ID = @Site)
+),
+op_summary AS (
+    SELECT
+        o.WORKORDER_TYPE,     o.WORKORDER_BASE_ID,
+        o.WORKORDER_LOT_ID,   o.WORKORDER_SPLIT_ID,
+        o.WORKORDER_SUB_ID,
+        COUNT(*)                                                  AS total_ops,
+        SUM(CASE WHEN o.STATUS = 'C' THEN 1 ELSE 0 END)           AS closed_ops,
+        SUM(CASE WHEN o.STATUS IN ('F','R') THEN 1 ELSE 0 END)    AS open_ops,
+        MIN(CASE WHEN o.STATUS IN ('F','R') THEN o.SEQUENCE_NO END) AS next_open_seq
+    FROM OPERATION o
+    GROUP BY
+        o.WORKORDER_TYPE,  o.WORKORDER_BASE_ID,
+        o.WORKORDER_LOT_ID,o.WORKORDER_SPLIT_ID,
+        o.WORKORDER_SUB_ID
+),
+linked_so AS (
+    SELECT
+        col.SITE_ID,
+        col.PART_ID,
+        SUM(col.ORDER_QTY - col.TOTAL_SHIPPED_QTY)                    AS linked_so_open_qty,
+        SUM((col.ORDER_QTY - col.TOTAL_SHIPPED_QTY) * col.UNIT_PRICE
+             * (100.0 - COALESCE(col.TRADE_DISC_PERCENT, 0)) / 100.0) AS linked_so_value,
+        MIN(col.PROMISE_DATE)                                         AS earliest_so_promise
+    FROM CUST_ORDER_LINE col
+    INNER JOIN CUSTOMER_ORDER co
+        ON co.ID = col.CUST_ORDER_ID
+    WHERE co.STATUS IN ('R','F')
+      AND col.LINE_STATUS = 'A'
+      AND col.ORDER_QTY > col.TOTAL_SHIPPED_QTY
+    GROUP BY col.SITE_ID, col.PART_ID
+)
+SELECT
+    w.SITE_ID,
+    w.TYPE + '-' + w.BASE_ID + '/' + w.LOT_ID + '/' + w.SPLIT_ID + '/' + w.SUB_ID AS wo_key,
+    w.STATUS,
+    w.PART_ID,
+    psv.DESCRIPTION                                          AS part_description,
+    w.PRODUCT_CODE,
+    w.WAREHOUSE_ID,
+    w.DESIRED_QTY,
+    w.RECEIVED_QTY,
+    w.remaining_qty,
+    CAST(100.0 * w.RECEIVED_QTY / NULLIF(w.DESIRED_QTY, 0) AS decimal(7,2)) AS pct_received,
+    w.DESIRED_WANT_DATE,
+    w.SCHED_FINISH_DATE,
+    DATEDIFF(day, w.DESIRED_WANT_DATE, @AsOfDate)            AS days_past_want,
+    CASE
+        WHEN w.DESIRED_WANT_DATE IS NULL                                 THEN 'NO_TARGET'
+        WHEN w.DESIRED_WANT_DATE >= @AsOfDate                            THEN 'NOT_DUE'
+        WHEN DATEDIFF(day, w.DESIRED_WANT_DATE, @AsOfDate) BETWEEN 1  AND  7 THEN '0-7'
+        WHEN DATEDIFF(day, w.DESIRED_WANT_DATE, @AsOfDate) BETWEEN 8  AND 14 THEN '8-14'
+        WHEN DATEDIFF(day, w.DESIRED_WANT_DATE, @AsOfDate) BETWEEN 15 AND 30 THEN '15-30'
+        WHEN DATEDIFF(day, w.DESIRED_WANT_DATE, @AsOfDate) BETWEEN 31 AND 60 THEN '31-60'
+        ELSE                                                                 '61+'
+    END                                                       AS aging_bucket,
+    w.rem_cost_total,
+    CAST(w.act_total_cost
+         - w.RECEIVED_QTY * (psv.UNIT_MATERIAL_COST + psv.UNIT_LABOR_COST
+                           + psv.UNIT_BURDEN_COST  + psv.UNIT_SERVICE_COST)
+        AS decimal(23,2))                                    AS wip_value_approx,
+    COALESCE(os.open_ops, 0)                                 AS open_ops,
+    no_op.SEQUENCE_NO                                        AS next_open_op_seq,
+    no_op.RESOURCE_ID                                        AS next_open_op_resource,
+    COALESCE(ls.linked_so_open_qty, 0)                       AS linked_so_open_qty,
+    COALESCE(ls.linked_so_value, 0)                          AS linked_so_value,
+    CASE
+        WHEN w.DESIRED_WANT_DATE < @AsOfDate
+         AND COALESCE(ls.linked_so_value, 0) > 0            THEN 'P1 - late, SO demand'
+        WHEN w.DESIRED_WANT_DATE < @AsOfDate                THEN 'P2 - late'
+        WHEN COALESCE(ls.linked_so_value, 0) > 0            THEN 'P3 - SO demand'
+        ELSE                                                     'P4 - normal'
+    END                                                      AS priority
+FROM open_wo w
+LEFT JOIN PART_SITE_VIEW psv
+    ON psv.SITE_ID = w.SITE_ID AND psv.PART_ID = w.PART_ID
+LEFT JOIN op_summary os
+    ON os.WORKORDER_TYPE     = w.TYPE
+   AND os.WORKORDER_BASE_ID  = w.BASE_ID
+   AND os.WORKORDER_LOT_ID   = w.LOT_ID
+   AND os.WORKORDER_SPLIT_ID = w.SPLIT_ID
+   AND os.WORKORDER_SUB_ID   = w.SUB_ID
+LEFT JOIN OPERATION no_op
+    ON no_op.WORKORDER_TYPE     = w.TYPE
+   AND no_op.WORKORDER_BASE_ID  = w.BASE_ID
+   AND no_op.WORKORDER_LOT_ID   = w.LOT_ID
+   AND no_op.WORKORDER_SPLIT_ID = w.SPLIT_ID
+   AND no_op.WORKORDER_SUB_ID   = w.SUB_ID
+   AND no_op.SEQUENCE_NO        = os.next_open_seq
+LEFT JOIN linked_so ls
+    ON ls.SITE_ID = w.SITE_ID AND ls.PART_ID = w.PART_ID
+ORDER BY
+    CASE
+        WHEN w.DESIRED_WANT_DATE IS NULL                           THEN 6
+        WHEN DATEDIFF(day, w.DESIRED_WANT_DATE, @AsOfDate) > 60    THEN 1
+        WHEN DATEDIFF(day, w.DESIRED_WANT_DATE, @AsOfDate) > 30    THEN 2
+        WHEN DATEDIFF(day, w.DESIRED_WANT_DATE, @AsOfDate) > 14    THEN 3
+        WHEN DATEDIFF(day, w.DESIRED_WANT_DATE, @AsOfDate) > 0     THEN 4
+        ELSE                                                            5
+    END,
+    w.rem_cost_total DESC;
+]]></CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@Site">
+            <Value>=Parameters!Site.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@AsOfDate">
+            <Value>=Parameters!AsOfDate.Value</Value>
+          </QueryParameter>
+        </QueryParameters>
+        <rd:UseGenericDesigner>true</rd:UseGenericDesigner>
+      </Query>
+      <Fields>
+        <Field Name="SITE_ID"><DataField>SITE_ID</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="wo_key"><DataField>wo_key</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="STATUS"><DataField>STATUS</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="PART_ID"><DataField>PART_ID</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="part_description"><DataField>part_description</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="PRODUCT_CODE"><DataField>PRODUCT_CODE</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="WAREHOUSE_ID"><DataField>WAREHOUSE_ID</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="DESIRED_QTY"><DataField>DESIRED_QTY</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="RECEIVED_QTY"><DataField>RECEIVED_QTY</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="remaining_qty"><DataField>remaining_qty</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="pct_received"><DataField>pct_received</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="DESIRED_WANT_DATE"><DataField>DESIRED_WANT_DATE</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
+        <Field Name="SCHED_FINISH_DATE"><DataField>SCHED_FINISH_DATE</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
+        <Field Name="days_past_want"><DataField>days_past_want</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="aging_bucket"><DataField>aging_bucket</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="rem_cost_total"><DataField>rem_cost_total</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="wip_value_approx"><DataField>wip_value_approx</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="open_ops"><DataField>open_ops</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="next_open_op_seq"><DataField>next_open_op_seq</DataField><rd:TypeName>System.Int16</rd:TypeName></Field>
+        <Field Name="next_open_op_resource"><DataField>next_open_op_resource</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="linked_so_open_qty"><DataField>linked_so_open_qty</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="linked_so_value"><DataField>linked_so_value</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="priority"><DataField>priority</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+  </DataSets>
+  <ReportParameters>
+    <ReportParameter Name="Site">
+      <DataType>String</DataType>
+      <Nullable>true</Nullable>
+      <AllowBlank>true</AllowBlank>
+      <DefaultValue>
+        <Values>
+          <Value xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" />
+        </Values>
+      </DefaultValue>
+      <Prompt>Site (blank = all)</Prompt>
+    </ReportParameter>
+    <ReportParameter Name="AsOfDate">
+      <DataType>DateTime</DataType>
+      <Nullable>false</Nullable>
+      <DefaultValue>
+        <Values>
+          <Value>=Today()</Value>
+        </Values>
+      </DefaultValue>
+      <Prompt>As Of Date</Prompt>
+    </ReportParameter>
+  </ReportParameters>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <ReportItems>
+          <Textbox Name="txtTitle">
+            <CanGrow>true</CanGrow>
+            <KeepTogether>true</KeepTogether>
+            <Paragraphs>
+              <Paragraph>
+                <TextRuns>
+                  <TextRun>
+                    <Value>Open Work Order Aging and WIP</Value>
+                    <Style>
+                      <FontFamily>Segoe UI</FontFamily>
+                      <FontSize>16pt</FontSize>
+                      <FontWeight>Bold</FontWeight>
+                    </Style>
+                  </TextRun>
+                </TextRuns>
+                <Style />
+              </Paragraph>
+            </Paragraphs>
+            <rd:DefaultName>txtTitle</rd:DefaultName>
+            <Top>0in</Top>
+            <Left>0in</Left>
+            <Height>0.3in</Height>
+            <Width>6in</Width>
+            <ZIndex>1</ZIndex>
+            <Style />
+          </Textbox>
+          <Textbox Name="txtSubtitle">
+            <CanGrow>true</CanGrow>
+            <KeepTogether>true</KeepTogether>
+            <Paragraphs>
+              <Paragraph>
+                <TextRuns>
+                  <TextRun>
+                    <Value>=IIF(Parameters!Site.Value Is Nothing Or Parameters!Site.Value = "", "All Sites", "Site: " &amp; Parameters!Site.Value) &amp; "  |  As Of: " &amp; Format(Parameters!AsOfDate.Value, "yyyy-MM-dd")</Value>
+                    <Style>
+                      <FontFamily>Segoe UI</FontFamily>
+                      <FontSize>10pt</FontSize>
+                      <Color>#555555</Color>
+                    </Style>
+                  </TextRun>
+                </TextRuns>
+                <Style />
+              </Paragraph>
+            </Paragraphs>
+            <rd:DefaultName>txtSubtitle</rd:DefaultName>
+            <Top>0.3in</Top>
+            <Left>0in</Left>
+            <Height>0.25in</Height>
+            <Width>8in</Width>
+            <ZIndex>2</ZIndex>
+            <Style />
+          </Textbox>
+          <Tablix Name="tblxOpenWO">
+            <TablixBody>
+              <TablixColumns>
+                <TablixColumn><Width>1.4in</Width></TablixColumn><!-- priority -->
+                <TablixColumn><Width>0.7in</Width></TablixColumn><!-- aging_bucket -->
+                <TablixColumn><Width>1.6in</Width></TablixColumn><!-- wo_key -->
+                <TablixColumn><Width>0.6in</Width></TablixColumn><!-- SITE_ID -->
+                <TablixColumn><Width>1.4in</Width></TablixColumn><!-- PART_ID -->
+                <TablixColumn><Width>2.0in</Width></TablixColumn><!-- part_description -->
+                <TablixColumn><Width>0.9in</Width></TablixColumn><!-- PRODUCT_CODE -->
+                <TablixColumn><Width>0.7in</Width></TablixColumn><!-- DESIRED_QTY -->
+                <TablixColumn><Width>0.7in</Width></TablixColumn><!-- remaining_qty -->
+                <TablixColumn><Width>0.8in</Width></TablixColumn><!-- DESIRED_WANT_DATE -->
+                <TablixColumn><Width>0.7in</Width></TablixColumn><!-- days_past_want -->
+                <TablixColumn><Width>1.0in</Width></TablixColumn><!-- next_open_op_resource -->
+                <TablixColumn><Width>1.0in</Width></TablixColumn><!-- rem_cost_total -->
+                <TablixColumn><Width>1.0in</Width></TablixColumn><!-- wip_value_approx -->
+                <TablixColumn><Width>1.1in</Width></TablixColumn><!-- linked_so_value -->
+              </TablixColumns>
+              <TablixRows>
+                <TablixRow>
+                  <Height>0.3in</Height>
+                  <TablixCells>
+                    <TablixCell><CellContents><Textbox Name="hPriority"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>Priority</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><rd:DefaultName>hPriority</rd:DefaultName><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="hAging"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>Aging</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><rd:DefaultName>hAging</rd:DefaultName><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="hWO"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>Work Order</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><rd:DefaultName>hWO</rd:DefaultName><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="hSite"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>Site</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><rd:DefaultName>hSite</rd:DefaultName><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="hPart"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>Part</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><rd:DefaultName>hPart</rd:DefaultName><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="hDesc"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>Description</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><rd:DefaultName>hDesc</rd:DefaultName><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="hProd"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>Product</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><rd:DefaultName>hProd</rd:DefaultName><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="hDesiredQty"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>Desired Qty</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><rd:DefaultName>hDesiredQty</rd:DefaultName><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="hRemQty"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>Remaining</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><rd:DefaultName>hRemQty</rd:DefaultName><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="hWant"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>Want Date</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><rd:DefaultName>hWant</rd:DefaultName><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="hDaysPast"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>Days Past</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><rd:DefaultName>hDaysPast</rd:DefaultName><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="hNextRes"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>Next Resource</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><rd:DefaultName>hNextRes</rd:DefaultName><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="hRemCost"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>Rem Cost</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><rd:DefaultName>hRemCost</rd:DefaultName><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="hWIP"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>WIP Value</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><rd:DefaultName>hWIP</rd:DefaultName><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="hSO"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>Linked SO $</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><rd:DefaultName>hSO</rd:DefaultName><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  </TablixCells>
+                </TablixRow>
+                <TablixRow>
+                  <Height>0.22in</Height>
+                  <TablixCells>
+                    <TablixCell><CellContents><Textbox Name="dPriority"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!priority.Value</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph></Paragraphs><rd:DefaultName>dPriority</rd:DefaultName><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><BackgroundColor>=Switch(Left(Fields!priority.Value,2)="P1","#FFCCCC", Left(Fields!priority.Value,2)="P2","#FFE5B4", Left(Fields!priority.Value,2)="P3","#FFF8C4", true, "White")</BackgroundColor><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="dAging"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!aging_bucket.Value</Value><Style><FontFamily>Segoe UI</FontFamily></Style></TextRun></TextRuns></Paragraph></Paragraphs><rd:DefaultName>dAging</rd:DefaultName><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="dWO"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!wo_key.Value</Value><Style><FontFamily>Consolas</FontFamily><FontSize>9pt</FontSize></Style></TextRun></TextRuns></Paragraph></Paragraphs><rd:DefaultName>dWO</rd:DefaultName><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="dSite"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!SITE_ID.Value</Value><Style><FontFamily>Segoe UI</FontFamily></Style></TextRun></TextRuns></Paragraph></Paragraphs><rd:DefaultName>dSite</rd:DefaultName><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="dPart"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!PART_ID.Value</Value><Style><FontFamily>Segoe UI</FontFamily></Style></TextRun></TextRuns></Paragraph></Paragraphs><rd:DefaultName>dPart</rd:DefaultName><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="dDesc"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!part_description.Value</Value><Style><FontFamily>Segoe UI</FontFamily></Style></TextRun></TextRuns></Paragraph></Paragraphs><rd:DefaultName>dDesc</rd:DefaultName><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="dProd"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!PRODUCT_CODE.Value</Value><Style><FontFamily>Segoe UI</FontFamily></Style></TextRun></TextRuns></Paragraph></Paragraphs><rd:DefaultName>dProd</rd:DefaultName><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="dDesiredQty"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!DESIRED_QTY.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N0</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><rd:DefaultName>dDesiredQty</rd:DefaultName><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="dRemQty"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!remaining_qty.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N0</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><rd:DefaultName>dRemQty</rd:DefaultName><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="dWant"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!DESIRED_WANT_DATE.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>yyyy-MM-dd</Format></Style></TextRun></TextRuns></Paragraph></Paragraphs><rd:DefaultName>dWant</rd:DefaultName><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="dDaysPast"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!days_past_want.Value</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>=IIF(Fields!days_past_want.Value &gt; 30,"Bold","Normal")</FontWeight><Color>=IIF(Fields!days_past_want.Value &gt; 30,"Red","Black")</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><rd:DefaultName>dDaysPast</rd:DefaultName><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="dNextRes"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!next_open_op_resource.Value</Value><Style><FontFamily>Segoe UI</FontFamily></Style></TextRun></TextRuns></Paragraph></Paragraphs><rd:DefaultName>dNextRes</rd:DefaultName><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="dRemCost"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!rem_cost_total.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>C0</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><rd:DefaultName>dRemCost</rd:DefaultName><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="dWIP"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!wip_value_approx.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>C0</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><rd:DefaultName>dWIP</rd:DefaultName><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="dSO"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!linked_so_value.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>C0</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><rd:DefaultName>dSO</rd:DefaultName><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  </TablixCells>
+                </TablixRow>
+                <TablixRow>
+                  <Height>0.3in</Height>
+                  <TablixCells>
+                    <TablixCell><CellContents><Textbox Name="fLabel"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>TOTAL</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph></Paragraphs><rd:DefaultName>fLabel</rd:DefaultName><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="fAging"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=CountRows()</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Format>N0</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><rd:DefaultName>fAging</rd:DefaultName><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="fWO"><Paragraphs><Paragraph><TextRuns><TextRun><Value>WOs</Value><Style><FontFamily>Segoe UI</FontFamily><FontStyle>Italic</FontStyle></Style></TextRun></TextRuns></Paragraph></Paragraphs><rd:DefaultName>fWO</rd:DefaultName><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="fSite"><Paragraphs><Paragraph /></Paragraphs><rd:DefaultName>fSite</rd:DefaultName><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="fPart"><Paragraphs><Paragraph /></Paragraphs><rd:DefaultName>fPart</rd:DefaultName><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="fDesc"><Paragraphs><Paragraph /></Paragraphs><rd:DefaultName>fDesc</rd:DefaultName><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="fProd"><Paragraphs><Paragraph /></Paragraphs><rd:DefaultName>fProd</rd:DefaultName><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="fDesiredQty"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Sum(Fields!DESIRED_QTY.Value)</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Format>N0</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><rd:DefaultName>fDesiredQty</rd:DefaultName><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="fRemQty"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Sum(Fields!remaining_qty.Value)</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Format>N0</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><rd:DefaultName>fRemQty</rd:DefaultName><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="fWant"><Paragraphs><Paragraph /></Paragraphs><rd:DefaultName>fWant</rd:DefaultName><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="fDaysPast"><Paragraphs><Paragraph /></Paragraphs><rd:DefaultName>fDaysPast</rd:DefaultName><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="fNextRes"><Paragraphs><Paragraph /></Paragraphs><rd:DefaultName>fNextRes</rd:DefaultName><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="fRemCost"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Sum(Fields!rem_cost_total.Value)</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Format>C0</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><rd:DefaultName>fRemCost</rd:DefaultName><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="fWIP"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Sum(Fields!wip_value_approx.Value)</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Format>C0</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><rd:DefaultName>fWIP</rd:DefaultName><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="fSO"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Sum(Fields!linked_so_value.Value)</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Format>C0</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><rd:DefaultName>fSO</rd:DefaultName><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor><PaddingLeft>4pt</PaddingLeft><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  </TablixCells>
+                </TablixRow>
+              </TablixRows>
+            </TablixBody>
+            <TablixColumnHierarchy>
+              <TablixMembers>
+                <TablixMember /><TablixMember /><TablixMember /><TablixMember />
+                <TablixMember /><TablixMember /><TablixMember /><TablixMember />
+                <TablixMember /><TablixMember /><TablixMember /><TablixMember />
+                <TablixMember /><TablixMember /><TablixMember />
+              </TablixMembers>
+            </TablixColumnHierarchy>
+            <TablixRowHierarchy>
+              <TablixMembers>
+                <TablixMember>
+                  <KeepWithGroup>After</KeepWithGroup>
+                  <RepeatOnNewPage>true</RepeatOnNewPage>
+                </TablixMember>
+                <TablixMember>
+                  <Group Name="Details" />
+                </TablixMember>
+                <TablixMember>
+                  <KeepWithGroup>Before</KeepWithGroup>
+                </TablixMember>
+              </TablixMembers>
+            </TablixRowHierarchy>
+            <RepeatColumnHeaders>true</RepeatColumnHeaders>
+            <DataSetName>OpenWOAging</DataSetName>
+            <Top>0.7in</Top>
+            <Left>0in</Left>
+            <Height>0.82in</Height>
+            <Width>15.6in</Width>
+            <ZIndex>3</ZIndex>
+            <Style>
+              <Border>
+                <Style>None</Style>
+              </Border>
+            </Style>
+          </Tablix>
+        </ReportItems>
+        <Height>2in</Height>
+        <Style />
+      </Body>
+      <Width>16in</Width>
+      <Page>
+        <PageHeader>
+          <Height>0.4in</Height>
+          <PrintOnFirstPage>true</PrintOnFirstPage>
+          <PrintOnLastPage>true</PrintOnLastPage>
+          <ReportItems>
+            <Textbox Name="txtPageTitle">
+              <CanGrow>true</CanGrow>
+              <KeepTogether>true</KeepTogether>
+              <Paragraphs>
+                <Paragraph>
+                  <TextRuns>
+                    <TextRun>
+                      <Value>Open WO Aging and WIP</Value>
+                      <Style>
+                        <FontFamily>Segoe UI</FontFamily>
+                        <FontSize>10pt</FontSize>
+                        <FontWeight>Bold</FontWeight>
+                        <Color>#555555</Color>
+                      </Style>
+                    </TextRun>
+                  </TextRuns>
+                </Paragraph>
+              </Paragraphs>
+              <rd:DefaultName>txtPageTitle</rd:DefaultName>
+              <Top>0.1in</Top>
+              <Left>0in</Left>
+              <Height>0.25in</Height>
+              <Width>5in</Width>
+              <ZIndex>0</ZIndex>
+              <Style />
+            </Textbox>
+            <Textbox Name="txtPageNum">
+              <CanGrow>true</CanGrow>
+              <KeepTogether>true</KeepTogether>
+              <Paragraphs>
+                <Paragraph>
+                  <TextRuns>
+                    <TextRun>
+                      <Value>=Globals!PageNumber &amp; " of " &amp; Globals!TotalPages</Value>
+                      <Style>
+                        <FontFamily>Segoe UI</FontFamily>
+                        <FontSize>9pt</FontSize>
+                        <Color>#555555</Color>
+                      </Style>
+                    </TextRun>
+                  </TextRuns>
+                  <Style>
+                    <TextAlign>Right</TextAlign>
+                  </Style>
+                </Paragraph>
+              </Paragraphs>
+              <rd:DefaultName>txtPageNum</rd:DefaultName>
+              <Top>0.1in</Top>
+              <Left>14in</Left>
+              <Height>0.25in</Height>
+              <Width>2in</Width>
+              <ZIndex>1</ZIndex>
+              <Style />
+            </Textbox>
+          </ReportItems>
+          <Style />
+        </PageHeader>
+        <PageHeight>8.5in</PageHeight>
+        <PageWidth>17in</PageWidth>
+        <LeftMargin>0.5in</LeftMargin>
+        <RightMargin>0.5in</RightMargin>
+        <TopMargin>0.5in</TopMargin>
+        <BottomMargin>0.5in</BottomMargin>
+        <ColumnSpacing>0.13in</ColumnSpacing>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <ReportID>a1b2c3d4-e5f6-7890-abcd-ef1234567890</ReportID>
+</Report>

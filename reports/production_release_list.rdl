@@ -1,0 +1,327 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+===============================================================================
+Report: Daily Production Release List
+File:   reports/production_release_list.rdl
+Source: queries/domains/supply_chain/planning/make_plan_weekly.sql
+
+Purpose:
+    Production planner's daily list of work orders to release. Filtered to
+    fab parts whose release date has arrived AND have all required
+    components.
+
+Audience: Production planner.
+Parameters: Site (blank = all)
+===============================================================================
+-->
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2010/01/reportdefinition"
+        xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="VECA">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString>Data Source=YOUR_SERVER;Initial Catalog=VECA</ConnectString>
+        <IntegratedSecurity>true</IntegratedSecurity>
+      </ConnectionProperties>
+      <rd:SecurityType>Integrated</rd:SecurityType>
+      <rd:DataSourceID>6f4e2c8a-9d31-4b67-8a22-1e8f7c2d3e91</rd:DataSourceID>
+    </DataSource>
+  </DataSources>
+  <DataSets>
+    <DataSet Name="ReleaseList">
+      <Query>
+        <DataSourceName>VECA</DataSourceName>
+        <CommandText><![CDATA[
+DECLARE @MaxDepth int = 20;
+DECLARE @WeekStart date = DATEADD(day,
+    -((DATEPART(weekday, CAST(GETDATE() AS date)) + @@DATEFIRST - 2) % 7), CAST(GETDATE() AS date));
+
+;WITH
+buckets AS (
+    SELECT 0 AS BUCKET_NO, CAST(@WeekStart AS date) AS BUCKET_START,
+           DATEADD(day, 7, CAST(@WeekStart AS date)) AS BUCKET_END
+    UNION ALL
+    SELECT BUCKET_NO + 1, DATEADD(week,1,BUCKET_START), DATEADD(week,1,BUCKET_END)
+    FROM buckets WHERE BUCKET_NO + 1 < @Horizon
+),
+demand AS (
+    SELECT col.SITE_ID, col.PART_ID,
+           COALESCE(col.PROMISE_DATE, col.DESIRED_SHIP_DATE, co.DESIRED_SHIP_DATE) AS NEED_DATE,
+           col.ORDER_QTY - col.TOTAL_SHIPPED_QTY AS DEMAND_QTY
+    FROM CUST_ORDER_LINE col INNER JOIN CUSTOMER_ORDER co ON co.ID = col.CUST_ORDER_ID
+    WHERE co.STATUS IN ('R','F') AND col.LINE_STATUS='A'
+      AND col.ORDER_QTY > col.TOTAL_SHIPPED_QTY AND col.PART_ID IS NOT NULL
+      AND (@Site IS NULL OR @Site='' OR col.SITE_ID = @Site)
+    UNION ALL
+    SELECT ms.SITE_ID, ms.PART_ID, ms.WANT_DATE, ms.ORDER_QTY
+    FROM MASTER_SCHEDULE ms WHERE ms.ORDER_QTY > 0
+      AND (@Site IS NULL OR @Site='' OR ms.SITE_ID = @Site)
+    UNION ALL
+    SELECT df.SITE_ID, df.PART_ID, df.REQUIRED_DATE, df.REQUIRED_QTY
+    FROM DEMAND_FORECAST df WHERE df.REQUIRED_QTY > 0
+      AND (@Site IS NULL OR @Site='' OR df.SITE_ID = @Site)
+),
+demand_agg AS (SELECT SITE_ID, PART_ID, NEED_DATE, SUM(DEMAND_QTY) AS DEMAND_QTY FROM demand GROUP BY SITE_ID, PART_ID, NEED_DATE),
+bom AS (
+    SELECT CAST(0 AS int) AS BOM_LEVEL, d.SITE_ID, d.NEED_DATE, d.PART_ID AS COMPONENT_PART_ID,
+           CAST(d.DEMAND_QTY AS decimal(28,8)) AS GROSS_QTY,
+           CAST('/' + d.PART_ID + '/' AS nvarchar(4000)) AS PATH
+    FROM demand_agg d
+    UNION ALL
+    SELECT parent.BOM_LEVEL + 1, parent.SITE_ID, parent.NEED_DATE, rq.PART_ID,
+           CAST(parent.GROSS_QTY * (rq.CALC_QTY / NULLIF(wo.DESIRED_QTY,0)) AS decimal(28,8)),
+           CAST(parent.PATH + rq.PART_ID + '/' AS nvarchar(4000))
+    FROM bom parent
+    JOIN PART_SITE_VIEW psv ON psv.PART_ID=parent.COMPONENT_PART_ID AND psv.SITE_ID=parent.SITE_ID
+         AND psv.FABRICATED='Y' AND psv.ENGINEERING_MSTR IS NOT NULL
+    JOIN WORK_ORDER wo ON wo.TYPE='M' AND wo.BASE_ID=psv.PART_ID
+         AND wo.LOT_ID=CAST(psv.ENGINEERING_MSTR AS nvarchar(3))
+         AND wo.SPLIT_ID='0' AND wo.SUB_ID='0' AND wo.SITE_ID=psv.SITE_ID
+    JOIN REQUIREMENT rq ON rq.WORKORDER_TYPE=wo.TYPE AND rq.WORKORDER_BASE_ID=wo.BASE_ID
+         AND rq.WORKORDER_LOT_ID=wo.LOT_ID AND rq.WORKORDER_SPLIT_ID=wo.SPLIT_ID
+         AND rq.WORKORDER_SUB_ID=wo.SUB_ID
+    WHERE rq.PART_ID IS NOT NULL AND rq.STATUS='U'
+      AND parent.BOM_LEVEL < @MaxDepth
+      AND CHARINDEX('/' + rq.PART_ID + '/', parent.PATH) = 0
+),
+gross_in_buckets AS (
+    SELECT b.SITE_ID, b.COMPONENT_PART_ID AS PART_ID,
+           CASE WHEN b.NEED_DATE < @WeekStart THEN 0
+                ELSE DATEDIFF(week, @WeekStart, b.NEED_DATE) END AS BUCKET_NO,
+           SUM(b.GROSS_QTY) AS GROSS_REQ
+    FROM bom b
+    WHERE b.NEED_DATE < DATEADD(week, @Horizon, @WeekStart)
+    GROUP BY b.SITE_ID, b.COMPONENT_PART_ID,
+             CASE WHEN b.NEED_DATE < @WeekStart THEN 0
+                  ELSE DATEDIFF(week, @WeekStart, b.NEED_DATE) END
+),
+po_supply AS (
+    SELECT p.SITE_ID, pl.PART_ID,
+           CASE WHEN COALESCE(pl.DESIRED_RECV_DATE, p.DESIRED_RECV_DATE) < @WeekStart THEN 0
+                ELSE DATEDIFF(week, @WeekStart,
+                              COALESCE(pl.DESIRED_RECV_DATE, p.DESIRED_RECV_DATE)) END AS BUCKET_NO,
+           SUM(pl.ORDER_QTY - pl.TOTAL_RECEIVED_QTY) AS OPEN_PO_QTY
+    FROM PURCHASE_ORDER p INNER JOIN PURC_ORDER_LINE pl ON pl.PURC_ORDER_ID = p.ID
+    WHERE ISNULL(p.STATUS,'') NOT IN ('X','C')
+      AND ISNULL(pl.LINE_STATUS,'') NOT IN ('X','C')
+      AND pl.PART_ID IS NOT NULL AND pl.ORDER_QTY > pl.TOTAL_RECEIVED_QTY
+      AND COALESCE(pl.DESIRED_RECV_DATE, p.DESIRED_RECV_DATE)
+            < DATEADD(week, @Horizon, @WeekStart)
+      AND (@Site IS NULL OR @Site='' OR p.SITE_ID = @Site)
+    GROUP BY p.SITE_ID, pl.PART_ID,
+             CASE WHEN COALESCE(pl.DESIRED_RECV_DATE, p.DESIRED_RECV_DATE) < @WeekStart THEN 0
+                  ELSE DATEDIFF(week, @WeekStart,
+                                COALESCE(pl.DESIRED_RECV_DATE, p.DESIRED_RECV_DATE)) END
+),
+wo_supply AS (
+    SELECT wo.SITE_ID, wo.PART_ID,
+           CASE WHEN COALESCE(wo.SCHED_FINISH_DATE, wo.DESIRED_WANT_DATE) < @WeekStart THEN 0
+                ELSE DATEDIFF(week, @WeekStart,
+                              COALESCE(wo.SCHED_FINISH_DATE, wo.DESIRED_WANT_DATE)) END AS BUCKET_NO,
+           SUM(wo.DESIRED_QTY - wo.RECEIVED_QTY) AS OPEN_WO_QTY
+    FROM WORK_ORDER wo
+    WHERE wo.TYPE='W' AND ISNULL(wo.STATUS,'') NOT IN ('X','C')
+      AND wo.DESIRED_QTY > wo.RECEIVED_QTY AND wo.PART_ID IS NOT NULL
+      AND COALESCE(wo.SCHED_FINISH_DATE, wo.DESIRED_WANT_DATE)
+            < DATEADD(week, @Horizon, @WeekStart)
+      AND (@Site IS NULL OR @Site='' OR wo.SITE_ID = @Site)
+    GROUP BY wo.SITE_ID, wo.PART_ID,
+             CASE WHEN COALESCE(wo.SCHED_FINISH_DATE, wo.DESIRED_WANT_DATE) < @WeekStart THEN 0
+                  ELSE DATEDIFF(week, @WeekStart,
+                                COALESCE(wo.SCHED_FINISH_DATE, wo.DESIRED_WANT_DATE)) END
+),
+parts_in_play AS (
+    SELECT DISTINCT SITE_ID, PART_ID FROM gross_in_buckets
+    UNION SELECT DISTINCT SITE_ID, PART_ID FROM po_supply
+    UNION SELECT DISTINCT SITE_ID, PART_ID FROM wo_supply
+),
+grid AS (
+    SELECT pip.SITE_ID, pip.PART_ID, bk.BUCKET_NO, bk.BUCKET_START,
+           ISNULL(g.GROSS_REQ,0) AS GROSS_REQ,
+           ISNULL(po.OPEN_PO_QTY,0)+ISNULL(w.OPEN_WO_QTY,0)-ISNULL(g.GROSS_REQ,0) AS NET_CHANGE
+    FROM parts_in_play pip CROSS JOIN buckets bk
+    LEFT JOIN gross_in_buckets g ON g.SITE_ID=pip.SITE_ID AND g.PART_ID=pip.PART_ID AND g.BUCKET_NO=bk.BUCKET_NO
+    LEFT JOIN po_supply po ON po.SITE_ID=pip.SITE_ID AND po.PART_ID=pip.PART_ID AND po.BUCKET_NO=bk.BUCKET_NO
+    LEFT JOIN wo_supply w ON w.SITE_ID=pip.SITE_ID AND w.PART_ID=pip.PART_ID AND w.BUCKET_NO=bk.BUCKET_NO
+),
+projected_fab AS (
+    SELECT g1.SITE_ID, g1.PART_ID, g1.BUCKET_NO, g1.BUCKET_START,
+           psv.PLANNER_USER_ID, psv.PLANNING_LEADTIME, psv.SAFETY_STOCK_QTY,
+           psv.MINIMUM_ORDER_QTY, psv.MULTIPLE_ORDER_QTY, psv.FIXED_ORDER_QTY,
+           psv.UNIT_MATERIAL_COST, psv.DESCRIPTION,
+           CASE WHEN ISNULL(psv.QTY_ON_HAND,0) + ISNULL(SUM(g2.NET_CHANGE),0)
+                     < ISNULL(psv.SAFETY_STOCK_QTY,0)
+                THEN ISNULL(psv.SAFETY_STOCK_QTY,0) - (ISNULL(psv.QTY_ON_HAND,0) + ISNULL(SUM(g2.NET_CHANGE),0))
+                ELSE 0 END AS NET_REQUIREMENT
+    FROM grid g1
+    LEFT JOIN grid g2 ON g2.SITE_ID=g1.SITE_ID AND g2.PART_ID=g1.PART_ID AND g2.BUCKET_NO <= g1.BUCKET_NO
+    JOIN PART_SITE_VIEW psv ON psv.SITE_ID=g1.SITE_ID AND psv.PART_ID=g1.PART_ID
+    WHERE psv.FABRICATED = 'Y' AND psv.ENGINEERING_MSTR IS NOT NULL
+    GROUP BY g1.SITE_ID, g1.PART_ID, g1.BUCKET_NO, g1.BUCKET_START,
+             psv.PLANNER_USER_ID, psv.PLANNING_LEADTIME, psv.SAFETY_STOCK_QTY,
+             psv.MINIMUM_ORDER_QTY, psv.MULTIPLE_ORDER_QTY, psv.FIXED_ORDER_QTY,
+             psv.UNIT_MATERIAL_COST, psv.DESCRIPTION, psv.QTY_ON_HAND
+),
+l1_components AS (
+    SELECT psv.SITE_ID, psv.PART_ID AS FAB_PART_ID,
+           rq.PART_ID AS COMPONENT_PART_ID,
+           rq.CALC_QTY / NULLIF(wo.DESIRED_QTY, 0) AS QTY_PER,
+           ISNULL(comp_psv.QTY_ON_HAND, 0) AS COMP_ON_HAND
+    FROM PART_SITE_VIEW psv
+    JOIN WORK_ORDER wo ON wo.TYPE='M' AND wo.BASE_ID=psv.PART_ID
+        AND wo.LOT_ID=CAST(psv.ENGINEERING_MSTR AS nvarchar(3))
+        AND wo.SPLIT_ID='0' AND wo.SUB_ID='0' AND wo.SITE_ID=psv.SITE_ID
+    JOIN REQUIREMENT rq ON rq.WORKORDER_TYPE=wo.TYPE AND rq.WORKORDER_BASE_ID=wo.BASE_ID
+        AND rq.WORKORDER_LOT_ID=wo.LOT_ID AND rq.WORKORDER_SPLIT_ID=wo.SPLIT_ID
+        AND rq.WORKORDER_SUB_ID=wo.SUB_ID
+    LEFT JOIN PART_SITE_VIEW comp_psv ON comp_psv.SITE_ID=psv.SITE_ID AND comp_psv.PART_ID=rq.PART_ID
+    WHERE psv.FABRICATED='Y' AND psv.ENGINEERING_MSTR IS NOT NULL
+      AND rq.PART_ID IS NOT NULL AND rq.STATUS='U'
+      AND (@Site IS NULL OR @Site='' OR psv.SITE_ID = @Site)
+)
+SELECT p.SITE_ID, p.PART_ID AS FAB_PART_ID, p.DESCRIPTION, p.PLANNER_USER_ID,
+       p.BUCKET_NO, p.BUCKET_START AS NEED_BY_DATE,
+       DATEADD(day, -ISNULL(p.PLANNING_LEADTIME,0), p.BUCKET_START) AS RECOMMENDED_RELEASE_DATE,
+       p.PLANNING_LEADTIME AS LT_DAYS, p.NET_REQUIREMENT AS BASE_NET_REQ,
+       CASE WHEN p.NET_REQUIREMENT <= 0 THEN 0
+            WHEN p.FIXED_ORDER_QTY > 0 THEN p.FIXED_ORDER_QTY * CEILING(p.NET_REQUIREMENT / p.FIXED_ORDER_QTY)
+            WHEN p.MULTIPLE_ORDER_QTY > 0 AND p.MINIMUM_ORDER_QTY > 0 THEN
+                CASE WHEN p.NET_REQUIREMENT < p.MINIMUM_ORDER_QTY THEN p.MINIMUM_ORDER_QTY
+                     ELSE p.MULTIPLE_ORDER_QTY * CEILING(p.NET_REQUIREMENT / p.MULTIPLE_ORDER_QTY) END
+            WHEN p.MULTIPLE_ORDER_QTY > 0 THEN p.MULTIPLE_ORDER_QTY * CEILING(p.NET_REQUIREMENT / p.MULTIPLE_ORDER_QTY)
+            WHEN p.MINIMUM_ORDER_QTY > 0 AND p.NET_REQUIREMENT < p.MINIMUM_ORDER_QTY THEN p.MINIMUM_ORDER_QTY
+            ELSE p.NET_REQUIREMENT END AS RECOMMENDED_BUILD_QTY,
+       rl.MIN_BUILDS_FROM_L1_COMPONENTS, rl.L1_COMPONENT_COUNT, rl.L1_COMPONENTS_AT_ZERO,
+       CAST(p.NET_REQUIREMENT * ISNULL(p.UNIT_MATERIAL_COST,0) AS decimal(23,2)) AS BUILD_VALUE_AT_STD,
+       CASE WHEN p.NET_REQUIREMENT <= 0 THEN 'OK'
+            WHEN DATEADD(day, -ISNULL(p.PLANNING_LEADTIME,0), p.BUCKET_START) <= CAST(GETDATE() AS date)
+                 AND ISNULL(rl.MIN_BUILDS_FROM_L1_COMPONENTS, 0) >= p.NET_REQUIREMENT THEN 'RELEASE NOW'
+            WHEN DATEADD(day, -ISNULL(p.PLANNING_LEADTIME,0), p.BUCKET_START) <= CAST(GETDATE() AS date)
+                 AND ISNULL(rl.MIN_BUILDS_FROM_L1_COMPONENTS, 0) > 0 THEN 'RELEASE NOW (PARTIAL)'
+            WHEN DATEADD(day, -ISNULL(p.PLANNING_LEADTIME,0), p.BUCKET_START) <= CAST(GETDATE() AS date)
+                THEN 'RELEASE NOW (BLOCKED)'
+            WHEN ISNULL(rl.MIN_BUILDS_FROM_L1_COMPONENTS, 0) = 0 THEN 'BLOCKED'
+            ELSE 'FUTURE RELEASE' END AS ACTION_STATUS
+FROM projected_fab p
+LEFT JOIN (
+    SELECT c.SITE_ID, c.FAB_PART_ID,
+           MIN(CASE WHEN c.QTY_PER > 0 THEN c.COMP_ON_HAND / c.QTY_PER ELSE 0 END) AS MIN_BUILDS_FROM_L1_COMPONENTS,
+           COUNT(*) AS L1_COMPONENT_COUNT,
+           SUM(CASE WHEN c.COMP_ON_HAND <= 0 THEN 1 ELSE 0 END) AS L1_COMPONENTS_AT_ZERO
+    FROM l1_components c GROUP BY c.SITE_ID, c.FAB_PART_ID
+) rl ON rl.SITE_ID=p.SITE_ID AND rl.FAB_PART_ID=p.PART_ID
+WHERE p.NET_REQUIREMENT > 0
+  AND DATEADD(day, -ISNULL(p.PLANNING_LEADTIME,0), p.BUCKET_START) <= CAST(GETDATE() AS date)
+ORDER BY
+    CASE WHEN ISNULL(rl.MIN_BUILDS_FROM_L1_COMPONENTS, 0) >= p.NET_REQUIREMENT THEN 1
+         WHEN ISNULL(rl.MIN_BUILDS_FROM_L1_COMPONENTS, 0) > 0 THEN 2
+         ELSE 3 END,
+    p.BUCKET_NO, p.SITE_ID, p.PART_ID
+OPTION (MAXRECURSION 0);
+        ]]></CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@Site"><Value>=Parameters!Site.Value</Value></QueryParameter>
+          <QueryParameter Name="@Horizon"><Value>=Parameters!Horizon.Value</Value></QueryParameter>
+        </QueryParameters>
+        <rd:UseGenericDesigner>true</rd:UseGenericDesigner>
+      </Query>
+      <Fields>
+        <Field Name="SITE_ID"><DataField>SITE_ID</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="FAB_PART_ID"><DataField>FAB_PART_ID</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="DESCRIPTION"><DataField>DESCRIPTION</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="PLANNER_USER_ID"><DataField>PLANNER_USER_ID</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="NEED_BY_DATE"><DataField>NEED_BY_DATE</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
+        <Field Name="RECOMMENDED_RELEASE_DATE"><DataField>RECOMMENDED_RELEASE_DATE</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
+        <Field Name="LT_DAYS"><DataField>LT_DAYS</DataField><rd:TypeName>System.Int16</rd:TypeName></Field>
+        <Field Name="BASE_NET_REQ"><DataField>BASE_NET_REQ</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="RECOMMENDED_BUILD_QTY"><DataField>RECOMMENDED_BUILD_QTY</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="MIN_BUILDS_FROM_L1_COMPONENTS"><DataField>MIN_BUILDS_FROM_L1_COMPONENTS</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="L1_COMPONENT_COUNT"><DataField>L1_COMPONENT_COUNT</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="L1_COMPONENTS_AT_ZERO"><DataField>L1_COMPONENTS_AT_ZERO</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="BUILD_VALUE_AT_STD"><DataField>BUILD_VALUE_AT_STD</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="ACTION_STATUS"><DataField>ACTION_STATUS</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+  </DataSets>
+  <ReportParameters>
+    <ReportParameter Name="Site"><DataType>String</DataType><Nullable>true</Nullable><AllowBlank>true</AllowBlank><DefaultValue><Values><Value xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" /></Values></DefaultValue><Prompt>Site (blank = all)</Prompt></ReportParameter>
+    <ReportParameter Name="Horizon"><DataType>Integer</DataType><Nullable>false</Nullable><DefaultValue><Values><Value>4</Value></Values></DefaultValue><Prompt>Horizon (weeks)</Prompt></ReportParameter>
+  </ReportParameters>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <ReportItems>
+          <Textbox Name="txtTitle"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Daily Production Release List</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>16pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph></Paragraphs><Top>0in</Top><Left>0in</Left><Height>0.3in</Height><Width>8in</Width><ZIndex>1</ZIndex><Style /></Textbox>
+          <Textbox Name="txtSubtitle"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=IIF(Parameters!Site.Value Is Nothing Or Parameters!Site.Value = "", "All Sites", "Site: " &amp; Parameters!Site.Value) &amp; "  |  Horizon: " &amp; Parameters!Horizon.Value &amp; " weeks  |  Generated: " &amp; Format(Now(), "yyyy-MM-dd HH:mm")</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>10pt</FontSize><Color>#555555</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Top>0.3in</Top><Left>0in</Left><Height>0.25in</Height><Width>15in</Width><ZIndex>2</ZIndex><Style /></Textbox>
+          <Tablix Name="tblxRelease">
+            <TablixBody>
+              <TablixColumns>
+                <TablixColumn><Width>1.8in</Width></TablixColumn>
+                <TablixColumn><Width>0.9in</Width></TablixColumn>
+                <TablixColumn><Width>0.9in</Width></TablixColumn>
+                <TablixColumn><Width>0.5in</Width></TablixColumn>
+                <TablixColumn><Width>1.4in</Width></TablixColumn>
+                <TablixColumn><Width>2.0in</Width></TablixColumn>
+                <TablixColumn><Width>0.8in</Width></TablixColumn>
+                <TablixColumn><Width>0.8in</Width></TablixColumn>
+                <TablixColumn><Width>0.7in</Width></TablixColumn>
+                <TablixColumn><Width>0.9in</Width></TablixColumn>
+                <TablixColumn><Width>1.0in</Width></TablixColumn>
+              </TablixColumns>
+              <TablixRows>
+                <TablixRow><Height>0.3in</Height><TablixCells>
+                  <TablixCell><CellContents><Textbox Name="hStatus"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Action</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hRel"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Release By</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hNeed"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Need By</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hSite"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Site</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hPart"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Part</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hDesc"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Description</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hQty"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Build Qty</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hSupp"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Comp Avail</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hZero"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Zero Comp</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hLT"><Paragraphs><Paragraph><TextRuns><TextRun><Value>LT (d)</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hVal"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Build $</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                </TablixCells></TablixRow>
+                <TablixRow><Height>0.22in</Height><TablixCells>
+                  <TablixCell><CellContents><Textbox Name="dStatus"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!ACTION_STATUS.Value</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><BackgroundColor>=Switch(Fields!ACTION_STATUS.Value="RELEASE NOW","#CCFFCC", Fields!ACTION_STATUS.Value="RELEASE NOW (PARTIAL)","#FFF8C4", Fields!ACTION_STATUS.Value="RELEASE NOW (BLOCKED)","#FFCCCC", Fields!ACTION_STATUS.Value="BLOCKED","#FFCCCC", true, "White")</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dRel"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!RECOMMENDED_RELEASE_DATE.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>yyyy-MM-dd</Format><FontWeight>=IIF(Fields!RECOMMENDED_RELEASE_DATE.Value &lt; Today(),"Bold","Normal")</FontWeight><Color>=IIF(Fields!RECOMMENDED_RELEASE_DATE.Value &lt; Today(),"Red","Black")</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dNeed"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!NEED_BY_DATE.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>yyyy-MM-dd</Format></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dSite"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!SITE_ID.Value</Value><Style><FontFamily>Segoe UI</FontFamily></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dPart"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!FAB_PART_ID.Value</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dDesc"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!DESCRIPTION.Value</Value><Style><FontFamily>Segoe UI</FontFamily></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dQty"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!RECOMMENDED_BUILD_QTY.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N0</Format><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dSupp"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!MIN_BUILDS_FROM_L1_COMPONENTS.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N0</Format><Color>=IIF(IsNothing(Fields!MIN_BUILDS_FROM_L1_COMPONENTS.Value),"Black", IIF(Fields!MIN_BUILDS_FROM_L1_COMPONENTS.Value &gt;= Fields!RECOMMENDED_BUILD_QTY.Value, "Black", "Red"))</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dZero"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!L1_COMPONENTS_AT_ZERO.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N0</Format><Color>=IIF(Fields!L1_COMPONENTS_AT_ZERO.Value &gt; 0,"Red","Black")</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dLT"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!LT_DAYS.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N0</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dVal"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!BUILD_VALUE_AT_STD.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>C0</Format><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                </TablixCells></TablixRow>
+              </TablixRows>
+            </TablixBody>
+            <TablixColumnHierarchy><TablixMembers><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /></TablixMembers></TablixColumnHierarchy>
+            <TablixRowHierarchy><TablixMembers><TablixMember><KeepWithGroup>After</KeepWithGroup><RepeatOnNewPage>true</RepeatOnNewPage></TablixMember><TablixMember><Group Name="Details" /></TablixMember></TablixMembers></TablixRowHierarchy>
+            <RepeatColumnHeaders>true</RepeatColumnHeaders>
+            <DataSetName>ReleaseList</DataSetName>
+            <Top>0.7in</Top><Left>0in</Left><Height>0.52in</Height><Width>11.7in</Width><ZIndex>3</ZIndex>
+            <Style><Border><Style>None</Style></Border></Style>
+          </Tablix>
+        </ReportItems>
+        <Height>2in</Height><Style />
+      </Body>
+      <Width>13in</Width>
+      <Page>
+        <PageHeader><Height>0.4in</Height><PrintOnFirstPage>true</PrintOnFirstPage><PrintOnLastPage>true</PrintOnLastPage>
+          <ReportItems>
+            <Textbox Name="txtPageTitle"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Production Release List</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>10pt</FontSize><FontWeight>Bold</FontWeight><Color>#555555</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Top>0.1in</Top><Left>0in</Left><Height>0.25in</Height><Width>5in</Width><ZIndex>0</ZIndex><Style /></Textbox>
+            <Textbox Name="txtPageNum"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Globals!PageNumber &amp; " of " &amp; Globals!TotalPages</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>9pt</FontSize><Color>#555555</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Top>0.1in</Top><Left>11in</Left><Height>0.25in</Height><Width>2in</Width><ZIndex>1</ZIndex><Style /></Textbox>
+          </ReportItems><Style />
+        </PageHeader>
+        <PageHeight>8.5in</PageHeight><PageWidth>14in</PageWidth>
+        <LeftMargin>0.5in</LeftMargin><RightMargin>0.5in</RightMargin>
+        <TopMargin>0.5in</TopMargin><BottomMargin>0.5in</BottomMargin>
+        <ColumnSpacing>0.13in</ColumnSpacing><Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <ReportID>c8d9e0f1-a2b3-4567-2345-890123456789</ReportID>
+</Report>

@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+===============================================================================
+Report: Vendor OTD Scorecard
+File:   reports/vendor_otd_scorecard.rdl
+Source: queries/domains/supply_chain/performance/vendor_otd_scorecard.sql
+
+Purpose:
+    Vendor on-time delivery, quality, and spend scorecard for monthly review.
+
+Audience: Purchasing manager, sourcing.
+
+Parameters:
+    Site                 - blank = all
+    FromDate             - default trailing 365 days
+    ToDate               - default today
+    OnTimeToleranceDays  - default 0
+    MinReceipts          - default 0
+===============================================================================
+-->
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2010/01/reportdefinition"
+        xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="VECA">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString>Data Source=YOUR_SERVER;Initial Catalog=VECA</ConnectString>
+        <IntegratedSecurity>true</IntegratedSecurity>
+      </ConnectionProperties>
+      <rd:SecurityType>Integrated</rd:SecurityType>
+      <rd:DataSourceID>6f4e2c8a-9d31-4b67-8a22-1e8f7c2d3e91</rd:DataSourceID>
+    </DataSource>
+  </DataSources>
+  <DataSets>
+    <DataSet Name="VendorOTD">
+      <Query>
+        <DataSourceName>VECA</DataSourceName>
+        <CommandText><![CDATA[
+;WITH receipts AS (
+    SELECT p.SITE_ID, p.VENDOR_ID, p.ID AS po_id, pl.LINE_NO AS po_line_no,
+           pl.PART_ID, r.ID AS receiver_id, rl.LINE_NO AS receiver_line_no,
+           r.RECEIVED_DATE, rl.RECEIVED_QTY,
+           COALESCE(rl.REJECTED_QTY, 0) AS rejected_qty,
+           COALESCE(pd.DESIRED_RECV_DATE, pl.DESIRED_RECV_DATE,
+                    p.PROMISE_DATE, p.DESIRED_RECV_DATE) AS target_recv_date,
+           DATEDIFF(day, COALESCE(pd.DESIRED_RECV_DATE, pl.DESIRED_RECV_DATE,
+                                  p.PROMISE_DATE, p.DESIRED_RECV_DATE),
+                    r.RECEIVED_DATE) AS days_late,
+           it.ACT_MATERIAL_COST AS receipt_value
+    FROM RECEIVER r
+    INNER JOIN RECEIVER_LINE rl ON rl.RECEIVER_ID = r.ID
+    INNER JOIN PURCHASE_ORDER p ON p.ID = r.PURC_ORDER_ID
+    INNER JOIN PURC_ORDER_LINE pl ON pl.PURC_ORDER_ID = rl.PURC_ORDER_ID
+        AND pl.LINE_NO = rl.PURC_ORDER_LINE_NO
+    LEFT JOIN PURC_LINE_DEL pd ON pd.PURC_ORDER_ID = pl.PURC_ORDER_ID
+        AND pd.PURC_ORDER_LINE_NO = pl.LINE_NO AND pd.DEL_SCHED_LINE_NO = 1
+    LEFT JOIN INVENTORY_TRANS it ON it.TRANSACTION_ID = rl.TRANSACTION_ID
+    WHERE r.RECEIVED_DATE >= @FromDate AND r.RECEIVED_DATE < @ToDate
+      AND rl.RECEIVED_QTY > 0
+      AND (@Site IS NULL OR @Site='' OR p.SITE_ID = @Site)
+),
+flagged AS (
+    SELECT r.*,
+           CASE WHEN r.days_late <= @OnTimeToleranceDays THEN 1 ELSE 0 END AS is_on_time,
+           CASE WHEN r.days_late > @OnTimeToleranceDays THEN 1 ELSE 0 END AS is_late,
+           CASE WHEN r.rejected_qty > 0 THEN 1 ELSE 0 END AS had_rejection
+    FROM receipts r
+),
+vendor_agg AS (
+    SELECT f.SITE_ID, f.VENDOR_ID,
+           COUNT(*) AS total_receipts,
+           COUNT(DISTINCT f.po_id) AS unique_pos,
+           COUNT(DISTINCT f.PART_ID) AS unique_parts,
+           SUM(f.is_on_time) AS on_time_receipts,
+           SUM(f.is_late) AS late_receipts,
+           CAST(100.0 * SUM(f.is_on_time) / NULLIF(COUNT(*), 0) AS decimal(5,2)) AS otd_pct,
+           CAST(AVG(CAST(f.days_late AS float)) AS decimal(7,2)) AS avg_days_late,
+           MAX(f.days_late) AS max_days_late,
+           SUM(f.RECEIVED_QTY) AS total_received_qty,
+           SUM(f.rejected_qty) AS total_rejected_qty,
+           CAST(100.0 * SUM(f.rejected_qty) / NULLIF(SUM(f.RECEIVED_QTY + f.rejected_qty), 0) AS decimal(5,2)) AS reject_pct,
+           SUM(COALESCE(f.receipt_value, 0)) AS total_spend
+    FROM flagged f GROUP BY f.SITE_ID, f.VENDOR_ID
+)
+SELECT va.SITE_ID, va.VENDOR_ID, v.NAME AS vendor_name,
+       va.unique_pos, va.unique_parts, va.total_receipts,
+       va.on_time_receipts, va.late_receipts, va.otd_pct,
+       va.avg_days_late, va.max_days_late,
+       va.total_received_qty, va.total_rejected_qty, va.reject_pct,
+       va.total_spend,
+       CAST(va.total_spend / NULLIF(va.total_receipts, 0) AS decimal(22,2)) AS avg_spend_per_receipt,
+       CASE WHEN va.otd_pct >= 95 AND va.reject_pct < 1 THEN 'A - PREFERRED'
+            WHEN va.otd_pct >= 85 AND va.reject_pct < 2 THEN 'B - ACCEPTABLE'
+            WHEN va.otd_pct >= 70 THEN 'C - NEEDS IMPROVEMENT'
+            ELSE 'D - AT RISK' END AS vendor_tier
+FROM vendor_agg va LEFT JOIN VENDOR v ON v.ID = va.VENDOR_ID
+WHERE va.total_receipts >= @MinReceipts
+ORDER BY va.total_spend DESC, va.otd_pct ASC;
+        ]]></CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@Site"><Value>=Parameters!Site.Value</Value></QueryParameter>
+          <QueryParameter Name="@FromDate"><Value>=Parameters!FromDate.Value</Value></QueryParameter>
+          <QueryParameter Name="@ToDate"><Value>=Parameters!ToDate.Value</Value></QueryParameter>
+          <QueryParameter Name="@OnTimeToleranceDays"><Value>=Parameters!OnTimeToleranceDays.Value</Value></QueryParameter>
+          <QueryParameter Name="@MinReceipts"><Value>=Parameters!MinReceipts.Value</Value></QueryParameter>
+        </QueryParameters>
+        <rd:UseGenericDesigner>true</rd:UseGenericDesigner>
+      </Query>
+      <Fields>
+        <Field Name="SITE_ID"><DataField>SITE_ID</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="VENDOR_ID"><DataField>VENDOR_ID</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="vendor_name"><DataField>vendor_name</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="unique_pos"><DataField>unique_pos</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="unique_parts"><DataField>unique_parts</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="total_receipts"><DataField>total_receipts</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="on_time_receipts"><DataField>on_time_receipts</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="late_receipts"><DataField>late_receipts</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="otd_pct"><DataField>otd_pct</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="avg_days_late"><DataField>avg_days_late</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="max_days_late"><DataField>max_days_late</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="reject_pct"><DataField>reject_pct</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="total_spend"><DataField>total_spend</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="vendor_tier"><DataField>vendor_tier</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+  </DataSets>
+  <ReportParameters>
+    <ReportParameter Name="Site"><DataType>String</DataType><Nullable>true</Nullable><AllowBlank>true</AllowBlank><DefaultValue><Values><Value xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" /></Values></DefaultValue><Prompt>Site (blank = all)</Prompt></ReportParameter>
+    <ReportParameter Name="FromDate"><DataType>DateTime</DataType><Nullable>false</Nullable><DefaultValue><Values><Value>=DateAdd("d", -365, Today())</Value></Values></DefaultValue><Prompt>From Date</Prompt></ReportParameter>
+    <ReportParameter Name="ToDate"><DataType>DateTime</DataType><Nullable>false</Nullable><DefaultValue><Values><Value>=Today()</Value></Values></DefaultValue><Prompt>To Date</Prompt></ReportParameter>
+    <ReportParameter Name="OnTimeToleranceDays"><DataType>Integer</DataType><Nullable>false</Nullable><DefaultValue><Values><Value>0</Value></Values></DefaultValue><Prompt>On-Time Tolerance (days)</Prompt></ReportParameter>
+    <ReportParameter Name="MinReceipts"><DataType>Integer</DataType><Nullable>false</Nullable><DefaultValue><Values><Value>0</Value></Values></DefaultValue><Prompt>Min Receipts</Prompt></ReportParameter>
+  </ReportParameters>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <ReportItems>
+          <Textbox Name="txtTitle"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Vendor OTD Scorecard</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>16pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph></Paragraphs><Top>0in</Top><Left>0in</Left><Height>0.3in</Height><Width>6in</Width><ZIndex>1</ZIndex><Style /></Textbox>
+          <Textbox Name="txtSubtitle"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=IIF(Parameters!Site.Value Is Nothing Or Parameters!Site.Value = "", "All Sites", "Site: " &amp; Parameters!Site.Value) &amp; "  |  " &amp; Format(Parameters!FromDate.Value, "yyyy-MM-dd") &amp; " to " &amp; Format(Parameters!ToDate.Value, "yyyy-MM-dd") &amp; "  |  Tolerance: " &amp; Parameters!OnTimeToleranceDays.Value &amp; "d"</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>10pt</FontSize><Color>#555555</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Top>0.3in</Top><Left>0in</Left><Height>0.25in</Height><Width>15in</Width><ZIndex>2</ZIndex><Style /></Textbox>
+          <Tablix Name="tblxVendor">
+            <TablixBody>
+              <TablixColumns>
+                <TablixColumn><Width>1.6in</Width></TablixColumn>
+                <TablixColumn><Width>0.9in</Width></TablixColumn>
+                <TablixColumn><Width>2.0in</Width></TablixColumn>
+                <TablixColumn><Width>0.6in</Width></TablixColumn>
+                <TablixColumn><Width>0.6in</Width></TablixColumn>
+                <TablixColumn><Width>0.7in</Width></TablixColumn>
+                <TablixColumn><Width>0.7in</Width></TablixColumn>
+                <TablixColumn><Width>0.7in</Width></TablixColumn>
+                <TablixColumn><Width>0.7in</Width></TablixColumn>
+                <TablixColumn><Width>0.7in</Width></TablixColumn>
+                <TablixColumn><Width>0.7in</Width></TablixColumn>
+                <TablixColumn><Width>1.1in</Width></TablixColumn>
+              </TablixColumns>
+              <TablixRows>
+                <TablixRow><Height>0.3in</Height><TablixCells>
+                  <TablixCell><CellContents><Textbox Name="hTier"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Tier</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hVID"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Vendor ID</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hVName"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Vendor Name</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hPOs"><Paragraphs><Paragraph><TextRuns><TextRun><Value>POs</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hParts"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Parts</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hRcv"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Receipts</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hOTD"><Paragraphs><Paragraph><TextRuns><TextRun><Value>OTD %</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hAvg"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Avg Late</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hMax"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Max Late</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hRej"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Reject %</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hSpend"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Spend $</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hAvgS"><Paragraphs><Paragraph><TextRuns><TextRun><Value>$/Receipt</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                </TablixCells></TablixRow>
+                <TablixRow><Height>0.22in</Height><TablixCells>
+                  <TablixCell><CellContents><Textbox Name="dTier"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!vendor_tier.Value</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><BackgroundColor>=Switch(Left(Fields!vendor_tier.Value,1)="A","#CCFFCC", Left(Fields!vendor_tier.Value,1)="B","#FFFFCC", Left(Fields!vendor_tier.Value,1)="C","#FFE5B4", Left(Fields!vendor_tier.Value,1)="D","#FFCCCC", true, "White")</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dVID"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!VENDOR_ID.Value</Value><Style><FontFamily>Segoe UI</FontFamily></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dVName"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!vendor_name.Value</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dPOs"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!unique_pos.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N0</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dParts"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!unique_parts.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N0</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dRcv"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!total_receipts.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N0</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dOTD"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!otd_pct.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N1</Format><FontWeight>Bold</FontWeight><Color>=IIF(Fields!otd_pct.Value &lt; 70,"Red", IIF(Fields!otd_pct.Value &lt; 90, "DarkOrange", "Black"))</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dAvg"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!avg_days_late.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N1</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dMax"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!max_days_late.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N0</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dRej"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!reject_pct.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N2</Format><Color>=IIF(IsNothing(Fields!reject_pct.Value),"Black", IIF(Fields!reject_pct.Value &gt; 1, "Red", "Black"))</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dSpend"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!total_spend.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>C0</Format><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dAvgS"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!total_spend.Value / Fields!total_receipts.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>C0</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                </TablixCells></TablixRow>
+              </TablixRows>
+            </TablixBody>
+            <TablixColumnHierarchy><TablixMembers><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /></TablixMembers></TablixColumnHierarchy>
+            <TablixRowHierarchy><TablixMembers><TablixMember><KeepWithGroup>After</KeepWithGroup><RepeatOnNewPage>true</RepeatOnNewPage></TablixMember><TablixMember><Group Name="Details" /></TablixMember></TablixMembers></TablixRowHierarchy>
+            <RepeatColumnHeaders>true</RepeatColumnHeaders>
+            <DataSetName>VendorOTD</DataSetName>
+            <Top>0.7in</Top><Left>0in</Left><Height>0.52in</Height><Width>11.0in</Width><ZIndex>3</ZIndex>
+            <Style><Border><Style>None</Style></Border></Style>
+          </Tablix>
+        </ReportItems>
+        <Height>2in</Height><Style />
+      </Body>
+      <Width>12in</Width>
+      <Page>
+        <PageHeader><Height>0.4in</Height><PrintOnFirstPage>true</PrintOnFirstPage><PrintOnLastPage>true</PrintOnLastPage>
+          <ReportItems>
+            <Textbox Name="txtPageTitle"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Vendor OTD Scorecard</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>10pt</FontSize><FontWeight>Bold</FontWeight><Color>#555555</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Top>0.1in</Top><Left>0in</Left><Height>0.25in</Height><Width>5in</Width><ZIndex>0</ZIndex><Style /></Textbox>
+            <Textbox Name="txtPageNum"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Globals!PageNumber &amp; " of " &amp; Globals!TotalPages</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>9pt</FontSize><Color>#555555</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Top>0.1in</Top><Left>10in</Left><Height>0.25in</Height><Width>2in</Width><ZIndex>1</ZIndex><Style /></Textbox>
+          </ReportItems><Style />
+        </PageHeader>
+        <PageHeight>8.5in</PageHeight><PageWidth>13in</PageWidth>
+        <LeftMargin>0.5in</LeftMargin><RightMargin>0.5in</RightMargin>
+        <TopMargin>0.5in</TopMargin><BottomMargin>0.5in</BottomMargin>
+        <ColumnSpacing>0.13in</ColumnSpacing><Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <ReportID>b7c8d9e0-f1a2-3456-1234-789012345678</ReportID>
+</Report>
