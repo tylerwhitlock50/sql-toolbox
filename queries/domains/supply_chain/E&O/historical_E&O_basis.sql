@@ -131,6 +131,21 @@ part_location_qty_on_hand * standard_cost AS inventory_value_on_hand_standard_es
             ELSE NULL
         END AS annual_turns,
 
+        -- Weeks / months on hand: same denominator as annual_turns, just expressed
+        -- as a duration of cover instead of a turnover ratio. Undefined (NULL)
+        -- when there have been no issues in the trailing 360 days.
+        CASE
+            WHEN issues_360_day > 0
+            THEN 52.0 * part_location_qty_on_hand / NULLIF(issues_360_day, 0)
+            ELSE NULL
+        END AS weeks_on_hand,
+
+        CASE
+            WHEN issues_360_day > 0
+            THEN 12.0 * part_location_qty_on_hand / NULLIF(issues_360_day, 0)
+            ELSE NULL
+        END AS months_on_hand,
+
         CASE
             WHEN adjustment_qty_360_day >= 10 THEN 1
             WHEN issues_360_day > 0
@@ -163,6 +178,8 @@ SELECT
     issues_360_day,
 
     coalesce(annual_turns,0) as annual_turns,
+    coalesce(weeks_on_hand,0) as weeks_on_hand,
+    coalesce(months_on_hand,0) as months_on_hand,
 
     CASE
         WHEN annual_turns > 4 THEN 'URGENT BUY / HIGH VELOCITY'
