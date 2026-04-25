@@ -80,6 +80,9 @@ This folder is the source of truth for production-ready queries.
 | Supply Chain | `domains/supply_chain/E&O/historical_E&O_basis.sql` | Historical E&O cost basis |
 | Supply Chain | `domains/supply_chain/executive/waste_and_stagnation.sql` | **Waste report: stagnant, excess, dead, orphan WO, early PO** |
 | Supply Chain | `domains/supply_chain/executive/executive_supply_chain_kpis.sql` | **Per-site CEO KPI snapshot (backlog/WIP/inventory/OTD/turns)** |
+| Supply Chain | `domains/supply_chain/executive/component_uniqueness.sql` | **Per component: how many active FGs use it (variant / family / platform)** |
+| Supply Chain | `domains/supply_chain/executive/sku_complexity_scorecard.sql` | **Per SKU: T12 sales + batch/setup tax + variant-only inventory $** |
+| Supply Chain | `domains/supply_chain/executive/product_line_cost_to_serve.sql` | **Per product line: SKU mix, setup overhead, variation inventory $** |
 
 ## Canonical Rules
 
