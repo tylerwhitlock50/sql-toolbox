@@ -128,6 +128,13 @@ part_snapshot AS (
                   / (ih.QTY_ISSUED_T12 / 12.0)
              ELSE NULL
         END                                    AS MONTHS_OF_SUPPLY_ON_HAND,
+        -- Same calc as MONTHS_OF_SUPPLY_ON_HAND, expressed in weeks so the
+        -- excess narrative can present coverage in either unit.
+        CASE WHEN ISNULL(ih.QTY_ISSUED_T12, 0) > 0
+             THEN ISNULL(psv.QTY_ON_HAND, 0)
+                  / (ih.QTY_ISSUED_T12 / 52.0)
+             ELSE NULL
+        END                                    AS WEEKS_OF_SUPPLY_ON_HAND,
         ISNULL(sd.OPEN_SO_QTY, 0)             AS OPEN_SO_QTY,
         ISNULL(wd.OPEN_REQ_QTY, 0)            AS OPEN_REQ_QTY
     FROM PART_SITE_VIEW psv
@@ -182,8 +189,10 @@ excess AS (
         CAST(NULL AS smallint),
         CAST(NULL AS date),
         CONCAT(CAST(CAST(MONTHS_OF_SUPPLY_ON_HAND AS decimal(10,1)) AS nvarchar(20)),
-               ' months of supply on hand (threshold ',
-               CAST(@ExcessMonths AS nvarchar(10)), '). T12 issues = ',
+               ' months (~',
+               CAST(CAST(WEEKS_OF_SUPPLY_ON_HAND AS decimal(10,1)) AS nvarchar(20)),
+               ' weeks) of supply on hand (threshold ',
+               CAST(@ExcessMonths AS nvarchar(10)), ' months). T12 issues = ',
                CAST(CAST(QTY_ISSUED_T12 AS decimal(15,2)) AS nvarchar(30))),
         CAST('Reduce future buys; consider transfer or excess sale.' AS nvarchar(120)),
         ABC_CODE, BUYER_USER_ID, PLANNER_USER_ID
