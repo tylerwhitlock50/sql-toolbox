@@ -295,6 +295,13 @@ SELECT
     CAST(c.projected_supply / NULLIF(c.blended_monthly_demand, 0)
          AS decimal(10,2))                                         AS months_of_cover_total,
 
+    -- Same coverage expressed in weeks so the team can present in either
+    -- unit without re-deriving (52/12 ≈ 4.333 weeks per month).
+    CAST(52.0 / 12.0 * c.qty_on_hand / NULLIF(c.blended_monthly_demand, 0)
+         AS decimal(10,2))                                         AS weeks_of_cover_on_hand,
+    CAST(52.0 / 12.0 * c.projected_supply / NULLIF(c.blended_monthly_demand, 0)
+         AS decimal(10,2))                                         AS weeks_of_cover_total,
+
     -- Inventory value at standard cost
     CAST(c.qty_on_hand * c.std_unit_cost
          AS decimal(23,2))                                         AS on_hand_value_at_std,
