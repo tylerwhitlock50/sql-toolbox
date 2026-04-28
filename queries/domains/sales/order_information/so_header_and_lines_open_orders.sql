@@ -102,6 +102,14 @@ SELECT
     ) AS aging_days,
 
     ------------------------------------------------------------
+    -- Dollar calculations
+    ------------------------------------------------------------
+        CASE
+            WHEN l.order_qty - ISNULL(l.total_shipped_qty, 0) < 0 THEN 0
+            ELSE (l.order_qty - ISNULL(l.total_shipped_qty, 0)) * ISNULL(l.unit_price, 0)
+        END AS open_dollars,
+
+    ------------------------------------------------------------
     -- Effective dates
     -- Line-level dates override header dates when available.
     ------------------------------------------------------------
