@@ -1,13 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
 ===============================================================================
-Report: Open Work Order Aging and WIP
-File:   reports/open_wo_aging_and_wip.rdl
-Source: queries/domains/production/performance/open_wo_aging_and_wip.sql
+Report: Open Work Order List
+File:   reports/open_wo_list.rdl
+Source: queries/domains/production/performance/open_wo_list.sql
 
 Purpose:
-    Landscape-oriented SSRS report that renders the open-WO aging
-    snapshot. Prioritizes late WOs tied to open sales-order demand.
+    Landscape-oriented SSRS report listing all open work orders (on-time
+    AND past-due). Same priority codes as the past-due-focused variant:
+        P1 - late, on open SO
+        P2 - late, no SO linkage
+        P3 - not late, on open SO
+        P4 - normal
+    Sorted past-due first, then by remaining cost.
+
+Audience: Production manager, plant manager.
 
 Prerequisites:
     1. Uses shared data source reference "/VECA" — make sure that
@@ -23,6 +30,8 @@ Notes:
     - RDL 2016 schema. Compatible with SSRS 2016+ and Report Builder.
     - Conditional row color: red background for P1, light red for P2,
       yellow for P3.
+    - The narrower past-due-aging variant is preserved as
+      open_wo_aging_and_wip.rdl for reference.
 ===============================================================================
 -->
 <Report MustUnderstand="df"
@@ -40,7 +49,7 @@ Notes:
     </DataSource>
   </DataSources>
   <DataSets>
-    <DataSet Name="OpenWOAging">
+    <DataSet Name="OpenWO">
       <Query>
         <DataSourceName>VECA</DataSourceName>
         <CommandText><![CDATA[
@@ -245,7 +254,7 @@ ORDER BY
               <Paragraph>
                 <TextRuns>
                   <TextRun>
-                    <Value>Open Work Order Aging and WIP</Value>
+                    <Value>Open Work Order List</Value>
                     <Style>
                       <FontFamily>Segoe UI</FontFamily>
                       <FontSize>16pt</FontSize>
@@ -395,7 +404,7 @@ ORDER BY
               </TablixMembers>
             </TablixRowHierarchy>
             <RepeatColumnHeaders>true</RepeatColumnHeaders>
-            <DataSetName>OpenWOAging</DataSetName>
+            <DataSetName>OpenWO</DataSetName>
             <Top>0.7in</Top>
             <Left>0in</Left>
             <Height>0.82in</Height>
@@ -425,7 +434,7 @@ ORDER BY
                 <Paragraph>
                   <TextRuns>
                     <TextRun>
-                      <Value>Open WO Aging and WIP</Value>
+                      <Value>Open Work Order List</Value>
                       <Style>
                         <FontFamily>Segoe UI</FontFamily>
                         <FontSize>10pt</FontSize>
@@ -486,7 +495,7 @@ ORDER BY
       </Page>
     </ReportSection>
   </ReportSections>
-  <rd:ReportID>a1b2c3d4-e5f6-7890-abcd-ef1234567890</rd:ReportID>
+  <rd:ReportID>bbccddee-ff00-2233-4455-667788990011</rd:ReportID>
   <ReportParametersLayout>
     <GridLayoutDefinition>
       <NumberOfColumns>2</NumberOfColumns>

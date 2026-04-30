@@ -12,43 +12,35 @@ For the broader strategy (Tableau dashboards vs SSRS, phased rollout, ownership)
 | 2 | `buyer_summary.rdl` | `purchasing_plan_by_buyer_summary.sql` | Buyer + manager | Mon 6 AM, alongside #1 |
 | 3 | `daily_build_priority.rdl` | `shared_buildable_allocation.sql` | Shop floor, scheduling | Daily 6 AM, posted to floor |
 | 4 | `material_shortage_expedite.rdl` | `material_shortage_vs_open_demand.sql` | Buyer, planner | Daily 6 AM |
-| 5 | `past_due_po_followup.rdl` | `past_due_po_aging.sql` | Buyer | Mon + Wed |
+| 5 | `open_po_list.rdl` | `supply_chain/purchasing/open_po_list.sql` | Buyer, purchasing manager | Mon + Wed; supersedes `past_due_po_followup` |
+| 5a | `past_due_po_followup.rdl` | `supply_chain/performance/past_due_po_aging.sql` | _preserved for reference — past-due-only view_ | _ad-hoc_ |
 | 6 | `past_due_so_list.rdl` | `past_due_so_aging.sql` | CSR, sales | Daily 6 AM |
 | 7 | `vendor_otd_scorecard.rdl` | `vendor_otd_scorecard.sql` | Buyer, sourcing | Monthly |
 | 8 | `production_release_list.rdl` | `make_plan_weekly.sql` | Production planner | Daily 6 AM |
 | 9 | `so_fulfillment_risk.rdl` | `so_fulfillment_risk.sql` | CSR, sales | On-demand by SO# / customer |
 | 10 | `wo_completion_forecast.rdl` | `fg_completion_forecast.sql` | CSR, plant manager | On-demand / daily |
 | 11 | `stocking_policy_review.rdl` | `stocking_policy_recommendations.sql` | Materials manager | Quarterly |
-| 12 | `open_wo_aging_and_wip.rdl` | `open_wo_aging_and_wip.sql` | Plant manager | Daily 6 AM |
+| 12 | `open_wo_list.rdl` | `production/performance/open_wo_list.sql` | Plant manager, production manager | Daily 6 AM; supersedes `open_wo_aging_and_wip` |
+| 12a | `open_wo_aging_and_wip.rdl` | `production/performance/open_wo_aging_and_wip.sql` | _preserved for reference — same row-set, narrower title_ | _ad-hoc_ |
+| 13 | `open_so_list.rdl` | `so_header_and_lines_open_orders.sql` | CSR, sales, planning | Daily 6 AM |
 
 ## Deployment
 
+> **Schema / compliance:** all 12 reports use the **RDL 2016** schema and a shared data source reference. If you author a new report or hit a deserialization / run-time error, see [RDL_2016_CHECKLIST.md](RDL_2016_CHECKLIST.md) for the five gotchas (namespaces, `rd:ReportID`, empty `<Paragraph>`, `<ReportParametersLayout>`, etc.) and a quick compliance command.
+
 ### One-time setup
 
-1. **Update the data source connection string** in each `.rdl`. They ship with `Data Source=YOUR_SERVER;Initial Catalog=VECA` as a placeholder. Either:
-   - Edit each `.rdl` (find `YOUR_SERVER` and replace with your SQL Server host name), or
-   - Replace the embedded `<DataSource>` block with a `<DataSourceReference>` to a shared data source (`.rds`) on the report server. **Strongly recommended for production** so credentials and host name aren't duplicated across 12 files.
+1. **Create the shared data source** on the report server at `/VECA` pointing at the VECA database with whatever auth model your environment uses (Integrated for SSO, or a stored SQL credential for subscriptions). Each `.rdl` already references this path via `<DataSourceReference>/VECA</DataSourceReference>`.
 
-   Example replacement in each RDL — replace this:
-   ```xml
-   <DataSource Name="VECA">
-     <ConnectionProperties>...</ConnectionProperties>
-     <rd:SecurityType>Integrated</rd:SecurityType>
-     <rd:DataSourceID>...</rd:DataSourceID>
-   </DataSource>
-   ```
-   with this:
-   ```xml
-   <DataSource Name="VECA">
-     <DataSourceReference>/Shared Data Sources/VECA</DataSourceReference>
-     <rd:SecurityType>None</rd:SecurityType>
-     <rd:DataSourceID>...</rd:DataSourceID>
-   </DataSource>
+   If your shared data source lives at a different path (e.g. `/Shared Data Sources/VECA`), bulk-update the reference across all 12 `.rdl` files:
+   ```powershell
+   Get-ChildItem reports\*.rdl | ForEach-Object {
+       (Get-Content $_.FullName) -replace '<DataSourceReference>/VECA</DataSourceReference>', '<DataSourceReference>/Shared Data Sources/VECA</DataSourceReference>' |
+       Set-Content $_.FullName
+   }
    ```
 
-2. **Create the shared data source** on the report server: `/Shared Data Sources/VECA` pointing at the VECA database with whatever auth model your environment uses (Integrated for SSO, or a stored SQL credential for subscriptions).
-
-3. **Test the data source** by previewing one report (e.g. `material_shortage_expedite.rdl`) before deploying the rest.
+2. **Test the data source** by previewing one report (e.g. `material_shortage_expedite.rdl`) before deploying the rest.
 
 ### Deploy via Report Builder / SSDT
 
@@ -84,7 +76,7 @@ foreach ($r in $Reports) {
    /Buying           <- buyer_po_action_list, buyer_summary, past_due_po_followup, vendor_otd_scorecard
    /Production       <- daily_build_priority, production_release_list, open_wo_aging_and_wip,
                         wo_completion_forecast, material_shortage_expedite
-   /Sales            <- past_due_so_list, so_fulfillment_risk
+   /Sales            <- open_so_list, past_due_so_list, so_fulfillment_risk
    /Inventory        <- stocking_policy_review
 /Shared Data Sources
    VECA
@@ -128,9 +120,9 @@ The SQL is embedded inline in each `.rdl`'s `<CommandText>` block (search for `C
 
 ## Common edits
 
-- **Server name in connection string**: search & replace `YOUR_SERVER` across all `.rdl` files.
-- **Add a Department or Customer parameter**: add a new `<ReportParameter>` in `<ReportParameters>`, a matching `<QueryParameter>` in `<QueryParameters>`, and reference it in the embedded SQL `WHERE` clause.
-- **Add a column to the printable layout**: add a `<TablixColumn>` to `<TablixColumns>`, add a `<TablixCell>` to both the header `<TablixRow>` and the detail `<TablixRow>`, and add a matching `<Field>` to `<Fields>` if it isn't there yet.
+- **Move to a different shared data source path**: bulk-replace `<DataSourceReference>/VECA</DataSourceReference>` across all `.rdl` files (see PowerShell snippet under "One-time setup").
+- **Add a Department or Customer parameter**: add a new `<ReportParameter>` in `<ReportParameters>`, a matching `<QueryParameter>` in `<QueryParameters>`, reference it in the embedded SQL `WHERE` clause, **and** add a matching `<CellDefinition>` in `<ReportParametersLayout>` (incrementing `<NumberOfColumns>` / `<NumberOfRows>` if needed). Skipping the layout step gives you the "number of defined parameters is not equal to the number of cell definitions" error at run-time.
+- **Add a column to the printable layout**: add a `<TablixColumn>` to `<TablixColumns>`, add a `<TablixCell>` to both the header `<TablixRow>` and the detail `<TablixRow>`, and add a matching `<Field>` to `<Fields>` if it isn't there yet. For visually-blank cells (e.g. footer spacers), use `<Paragraphs><Paragraph><TextRuns><TextRun><Value /></TextRun></TextRuns></Paragraph></Paragraphs>` — never self-close `<Paragraph />` (RDL 2016 rejects it).
 - **Change the title**: update the value in `txtTitle`.
 
 ## Performance notes

@@ -45,7 +45,8 @@ This folder is the source of truth for production-ready queries.
 | Inventory | `domains/inventory/part_information/exceptions_report.sql` | Inventory exception analysis |
 | Inventory | `domains/inventory/part_information/inventory_vs_part_location_qty_mismatch.sql` | Reconcile inventory vs part-location qty |
 | Inventory | `domains/inventory/part_information/stocking_policy_recommendations.sql` | **Recommended SS + ROP from demand × LT variability vs current setting** |
-| Production | `domains/production/performance/open_wo_aging_and_wip.sql` | Open WO aging + WIP $ |
+| Production | `domains/production/performance/open_wo_list.sql` | **Full open-WO list (on-time + late) + WIP $ + priority** — feeds `reports/open_wo_list.rdl` |
+| Production | `domains/production/performance/open_wo_aging_and_wip.sql` | Open WO aging + WIP $ (preserved for reference; same row-set as `open_wo_list.sql`) |
 | Production | `domains/production/performance/wo_otd_and_cycle_time.sql` | WO on-time + cycle time |
 | Production | `domains/production/performance/labor_productivity_scorecard.sql` | Labor productivity |
 | Production | `domains/production/performance/operation_efficiency_by_resource.sql` | Resource utilization |
@@ -64,6 +65,7 @@ This folder is the source of truth for production-ready queries.
 | Supply Chain | `domains/supply_chain/planning/shared_buildable_allocation.sql` | **Per-SO buildable AFTER priority allocation across competing SOs** |
 | Supply Chain | `domains/supply_chain/planning/purchasing_plan_by_buyer_summary.sql` | **Buyer × week roll-up: parts to order, $ to spend, past-due** |
 | Supply Chain | `domains/supply_chain/planning/make_plan_weekly.sql` | **Fabrication plan: WO release date + qty + component readiness** |
+| Supply Chain | `domains/supply_chain/purchasing/open_po_list.sql` | **Full open PO list (past-due + not-due) incl. service POs + priority** — feeds `reports/open_po_list.rdl` |
 | Supply Chain | `domains/supply_chain/purchasing/open_and_planned_supply_detail.sql` | Unified open PO + planned supply (UOM normalized) |
 | Supply Chain | `domains/supply_chain/purchasing/open_purchase_orders_uom_normalized.sql` | Open POs with UOM conversion |
 | Supply Chain | `domains/supply_chain/purchasing/part_cost_summary.sql` | Std vs weighted-avg vs last-PO cost |
@@ -74,7 +76,7 @@ This folder is the source of truth for production-ready queries.
 | Supply Chain | `domains/supply_chain/performance/vendor_scorecard_360.sql` | **Consolidated vendor 360 (spend + OTD + LT + price + risk)** |
 | Supply Chain | `domains/supply_chain/performance/commodity_spend_rollup.sql` | **Spend by commodity: top vendors, HHI concentration, inflation flags** |
 | Supply Chain | `domains/supply_chain/performance/buyer_performance_scorecard.sql` | Buyer-level OTD, spend, quality |
-| Supply Chain | `domains/supply_chain/performance/past_due_po_aging.sql` | Past-due PO aging |
+| Supply Chain | `domains/supply_chain/performance/past_due_po_aging.sql` | Past-due PO aging only (preserved for reference; broader version is `../purchasing/open_po_list.sql`) |
 | Supply Chain | `domains/supply_chain/performance/material_shortage_vs_open_demand.sql` | Component shortages tied to SO at risk |
 | Supply Chain | `domains/supply_chain/performance/eo_forecast_coverage_months.sql` | E&O forecast coverage months |
 | Supply Chain | `domains/supply_chain/E&O/historical_E&O_basis.sql` | Historical E&O cost basis |

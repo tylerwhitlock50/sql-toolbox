@@ -16,17 +16,17 @@ Parameters:
     Site - blank = all sites
 ===============================================================================
 -->
-<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2010/01/reportdefinition"
-        xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+<Report MustUnderstand="df"
+        xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition"
+        xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner"
+        xmlns:df="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition/defaultfontfamily">
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <df:DefaultFontFamily>Segoe UI</df:DefaultFontFamily>
   <AutoRefresh>0</AutoRefresh>
   <DataSources>
     <DataSource Name="VECA">
-      <ConnectionProperties>
-        <DataProvider>SQL</DataProvider>
-        <ConnectString>Data Source=YOUR_SERVER;Initial Catalog=VECA</ConnectString>
-        <IntegratedSecurity>true</IntegratedSecurity>
-      </ConnectionProperties>
-      <rd:SecurityType>Integrated</rd:SecurityType>
+      <rd:SecurityType>None</rd:SecurityType>
+      <DataSourceReference>/VECA</DataSourceReference>
       <rd:DataSourceID>6f4e2c8a-9d31-4b67-8a22-1e8f7c2d3e91</rd:DataSourceID>
     </DataSource>
   </DataSources>
@@ -291,5 +291,14 @@ OPTION (MAXRECURSION 0);
       </Page>
     </ReportSection>
   </ReportSections>
-  <ReportID>d3e4f5a6-b7c8-9012-def0-345678901234</ReportID>
+  <rd:ReportID>d3e4f5a6-b7c8-9012-def0-345678901234</rd:ReportID>
+  <ReportParametersLayout>
+    <GridLayoutDefinition>
+      <NumberOfColumns>1</NumberOfColumns>
+      <NumberOfRows>1</NumberOfRows>
+      <CellDefinitions>
+        <CellDefinition><ColumnIndex>0</ColumnIndex><RowIndex>0</RowIndex><ParameterName>Site</ParameterName></CellDefinition>
+      </CellDefinitions>
+    </GridLayoutDefinition>
+  </ReportParametersLayout>
 </Report>

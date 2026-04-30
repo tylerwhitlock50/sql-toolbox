@@ -51,14 +51,21 @@ Notes:
 ===============================================================================
 */
 
+------------------------------------------------------------
+-- Parameters
+-- Pass NULL (or blank) for "all sites".
+------------------------------------------------------------
+DECLARE @Site nvarchar(15) = NULL;   -- e.g. 'TDJ' or NULL = all sites
+
 SELECT
     ------------------------------------------------------------
     -- Order header fields
     ------------------------------------------------------------
-    h.id AS order_id,
+    h.site_id,
+    h.id                AS order_id,
     h.customer_id,
     h.customer_po_ref,
-    h.status AS order_status,
+    h.status            AS order_status,
     h.order_date,
     h.create_date,
     h.revision_id,
@@ -83,7 +90,7 @@ SELECT
     ------------------------------------------------------------
     -- Quantity calculations
     ------------------------------------------------------------
-    l.order_qty - l.total_shipped_qty AS open_qty_raw,
+    l.order_qty - ISNULL(l.total_shipped_qty, 0) AS open_qty_raw,
 
     CASE
         WHEN l.order_qty - ISNULL(l.total_shipped_qty, 0) < 0 THEN 0
@@ -104,18 +111,18 @@ SELECT
     ------------------------------------------------------------
     -- Dollar calculations
     ------------------------------------------------------------
-        CASE
-            WHEN l.order_qty - ISNULL(l.total_shipped_qty, 0) < 0 THEN 0
-            ELSE (l.order_qty - ISNULL(l.total_shipped_qty, 0)) * ISNULL(l.unit_price, 0)
-        END AS open_dollars,
+    CASE
+        WHEN l.order_qty - ISNULL(l.total_shipped_qty, 0) < 0 THEN 0
+        ELSE (l.order_qty - ISNULL(l.total_shipped_qty, 0)) * ISNULL(l.unit_price, 0)
+    END AS open_dollars,
 
     ------------------------------------------------------------
     -- Effective dates
     -- Line-level dates override header dates when available.
     ------------------------------------------------------------
     COALESCE(l.desired_ship_date, h.desired_ship_date) AS desired_ship_date,
-    COALESCE(l.promise_date, h.promise_date) AS promise_date,
-    COALESCE(l.promise_del_date, h.promise_del_date) AS promise_del_date
+    COALESCE(l.promise_date,      h.promise_date)      AS promise_date,
+    COALESCE(l.promise_del_date,  h.promise_del_date)  AS promise_del_date
 
 FROM customer_order h
 JOIN cust_order_line l
@@ -123,9 +130,14 @@ JOIN cust_order_line l
 
 WHERE
     ------------------------------------------------------------
+    -- Site filter (NULL/blank = all sites; SSRS-friendly)
+    ------------------------------------------------------------
+    (@Site IS NULL OR @Site = '' OR h.site_id = @Site)
+
+    ------------------------------------------------------------
     -- Keep only open/relevant customer orders
     ------------------------------------------------------------
-    h.status IN ('R', 'F')
+    AND h.status IN ('R', 'F')
 
     ------------------------------------------------------------
     -- Keep only active/open line items
@@ -140,4 +152,10 @@ WHERE
     ------------------------------------------------------------
     -- Exclude non-part/service/comment-style rows
     ------------------------------------------------------------
-    AND l.part_id IS NOT NULL;
+    AND l.part_id IS NOT NULL
+
+ORDER BY
+    h.site_id,
+    COALESCE(l.desired_ship_date, h.desired_ship_date),
+    h.id,
+    l.line_no;

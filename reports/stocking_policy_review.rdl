@@ -19,17 +19,17 @@ Parameters:
     ActionFilter          - 'ALL' / 'INCREASE SS' / 'DECREASE SS' / 'NEW POLICY'
 ===============================================================================
 -->
-<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2010/01/reportdefinition"
-        xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+<Report MustUnderstand="df"
+        xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition"
+        xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner"
+        xmlns:df="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition/defaultfontfamily">
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <df:DefaultFontFamily>Segoe UI</df:DefaultFontFamily>
   <AutoRefresh>0</AutoRefresh>
   <DataSources>
     <DataSource Name="VECA">
-      <ConnectionProperties>
-        <DataProvider>SQL</DataProvider>
-        <ConnectString>Data Source=YOUR_SERVER;Initial Catalog=VECA</ConnectString>
-        <IntegratedSecurity>true</IntegratedSecurity>
-      </ConnectionProperties>
-      <rd:SecurityType>Integrated</rd:SecurityType>
+      <rd:SecurityType>None</rd:SecurityType>
+      <DataSourceReference>/VECA</DataSourceReference>
       <rd:DataSourceID>6f4e2c8a-9d31-4b67-8a22-1e8f7c2d3e91</rd:DataSourceID>
     </DataSource>
   </DataSources>
@@ -252,18 +252,18 @@ ORDER BY
                 </TablixCells></TablixRow>
                 <TablixRow><Height>0.3in</Height><TablixCells>
                   <TablixCell><CellContents><Textbox Name="fLabel"><Paragraphs><Paragraph><TextRuns><TextRun><Value>NET DELTA $</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
-                  <TablixCell><CellContents><Textbox Name="fX1"><Paragraphs><Paragraph /></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
-                  <TablixCell><CellContents><Textbox Name="fX2"><Paragraphs><Paragraph /></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
-                  <TablixCell><CellContents><Textbox Name="fX3"><Paragraphs><Paragraph /></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
-                  <TablixCell><CellContents><Textbox Name="fX4"><Paragraphs><Paragraph /></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
-                  <TablixCell><CellContents><Textbox Name="fX5"><Paragraphs><Paragraph /></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
-                  <TablixCell><CellContents><Textbox Name="fX6"><Paragraphs><Paragraph /></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
-                  <TablixCell><CellContents><Textbox Name="fX7"><Paragraphs><Paragraph /></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
-                  <TablixCell><CellContents><Textbox Name="fX8"><Paragraphs><Paragraph /></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
-                  <TablixCell><CellContents><Textbox Name="fX9"><Paragraphs><Paragraph /></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
-                  <TablixCell><CellContents><Textbox Name="fX10"><Paragraphs><Paragraph /></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
-                  <TablixCell><CellContents><Textbox Name="fX11"><Paragraphs><Paragraph /></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
-                  <TablixCell><CellContents><Textbox Name="fX12"><Paragraphs><Paragraph /></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fX1"><Paragraphs><Paragraph><TextRuns><TextRun><Value /></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fX2"><Paragraphs><Paragraph><TextRuns><TextRun><Value /></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fX3"><Paragraphs><Paragraph><TextRuns><TextRun><Value /></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fX4"><Paragraphs><Paragraph><TextRuns><TextRun><Value /></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fX5"><Paragraphs><Paragraph><TextRuns><TextRun><Value /></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fX6"><Paragraphs><Paragraph><TextRuns><TextRun><Value /></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fX7"><Paragraphs><Paragraph><TextRuns><TextRun><Value /></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fX8"><Paragraphs><Paragraph><TextRuns><TextRun><Value /></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fX9"><Paragraphs><Paragraph><TextRuns><TextRun><Value /></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fX10"><Paragraphs><Paragraph><TextRuns><TextRun><Value /></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fX11"><Paragraphs><Paragraph><TextRuns><TextRun><Value /></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fX12"><Paragraphs><Paragraph><TextRuns><TextRun><Value /></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor></Style></Textbox></CellContents></TablixCell>
                   <TablixCell><CellContents><Textbox Name="fNet"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Sum(Fields!SS_DELTA_VALUE_AT_STD.Value)</Value><Style><FontFamily>Segoe UI</FontFamily><Format>C0</Format><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Style>Solid</Style></Border><BackgroundColor>#E7E6E6</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
                 </TablixCells></TablixRow>
               </TablixRows>
@@ -293,5 +293,18 @@ ORDER BY
       </Page>
     </ReportSection>
   </ReportSections>
-  <ReportID>f1a2b3c4-d5e6-7890-5678-123456789012</ReportID>
+  <rd:ReportID>f1a2b3c4-d5e6-7890-5678-123456789012</rd:ReportID>
+  <ReportParametersLayout>
+    <GridLayoutDefinition>
+      <NumberOfColumns>3</NumberOfColumns>
+      <NumberOfRows>2</NumberOfRows>
+      <CellDefinitions>
+        <CellDefinition><ColumnIndex>0</ColumnIndex><RowIndex>0</RowIndex><ParameterName>Site</ParameterName></CellDefinition>
+        <CellDefinition><ColumnIndex>1</ColumnIndex><RowIndex>0</RowIndex><ParameterName>ServiceLevelZ</ParameterName></CellDefinition>
+        <CellDefinition><ColumnIndex>2</ColumnIndex><RowIndex>0</RowIndex><ParameterName>DemandLookbackMonths</ParameterName></CellDefinition>
+        <CellDefinition><ColumnIndex>0</ColumnIndex><RowIndex>1</RowIndex><ParameterName>LTLookbackMonths</ParameterName></CellDefinition>
+        <CellDefinition><ColumnIndex>1</ColumnIndex><RowIndex>1</RowIndex><ParameterName>ActionFilter</ParameterName></CellDefinition>
+      </CellDefinitions>
+    </GridLayoutDefinition>
+  </ReportParametersLayout>
 </Report>

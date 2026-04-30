@@ -74,7 +74,8 @@ Domain folders under `queries/domains/`:
 Working rules:
 - SQL is embedded inline in each `.rdl`'s `<CommandText>` CDATA. When the canonical query evolves, copy the updated SQL into the matching RDL **but strip the top-level `DECLARE @Param ...;` lines** — SSRS passes those via `<QueryParameters>` and the `DECLARE`s will conflict.
 - Preserve the optional-filter pattern (`@Param IS NULL OR ...`) so blank = "all" still works in the report.
-- Connection strings ship with `Data Source=YOUR_SERVER;Initial Catalog=VECA` as a placeholder — prefer a shared data source reference over per-file edits.
+- All 12 reports use the **RDL 2016** schema and reference a shared data source at `/VECA` (no embedded `ConnectString`). When authoring a new report or chasing a deployment error, see [`reports/RDL_2016_CHECKLIST.md`](reports/RDL_2016_CHECKLIST.md) — it documents the five 2010→2016 strictness gotchas (`MustUnderstand="df"` + `df:` namespace, `<rd:ReportID>`, non-empty `<Paragraph>`, `<ReportParametersLayout>` with cell count = param count, shared `DataSourceReference`).
+- When adding/removing a report parameter, update `<ReportParameter>`, `<QueryParameter>`, **and** `<ReportParametersLayout>` together — mismatched counts fail at run-time, not at deserialization.
 - The BOM-driven reports (`buyer_po_action_list`, `daily_build_priority`, `so_fulfillment_risk`, etc.) re-walk the BOM every run; cache at SSRS or materialize to staging tables for production.
 
 ## The `old-queries/` dump

@@ -1,19 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
 ===============================================================================
-Report: Past-Due PO Follow-up
-File:   reports/past_due_po_followup.rdl
-Source: queries/domains/supply_chain/performance/past_due_po_aging.sql
+Report: Open PO List
+File:   reports/open_po_list.rdl
+Source: queries/domains/supply_chain/purchasing/open_po_list.sql
 
 Purpose:
-    Buyer's expediting list, sorted by aging bucket. Past-due lines that
-    feed an open SO are flagged P1.
+    Full list of open PO lines (past-due AND not-yet-due), sorted past-due
+    first then by open $ value. Same priority codes as the past-due variant:
+        P1 - past due, on open SO
+        P2 - past due, no SO linkage
+        P3 - not due, on open SO
+        P4 - normal
+    Includes service POs (lines where SERVICE_ID is populated, with or
+    without a PART_ID). Service lines render as "service_id | part_id"
+    so it's clear they're not a stock-part purchase.
 
 Audience: Buyer (filtered), purchasing manager.
 
 Parameters:
     Site     - blank = all
+    Buyer    - blank = all
     AsOfDate - default today
+
+Notes:
+    The past-due-only view is preserved as past_due_po_followup.rdl for
+    reference. This report supersedes it for buyer use.
 ===============================================================================
 -->
 <Report MustUnderstand="df"
@@ -31,14 +43,14 @@ Parameters:
     </DataSource>
   </DataSources>
   <DataSets>
-    <DataSet Name="PastDuePO">
+    <DataSet Name="OpenPO">
       <Query>
         <DataSourceName>VECA</DataSourceName>
         <CommandText><![CDATA[
 ;WITH open_po AS (
     SELECT p.SITE_ID, p.ID AS po_id, p.VENDOR_ID,
            COALESCE(NULLIF(LTRIM(RTRIM(p.BUYER)), ''), '(unassigned)') AS buyer,
-           p.ORDER_DATE, pl.LINE_NO, pl.PART_ID, pl.PURCHASE_UM, pl.UNIT_PRICE AS po_unit_price,
+           p.ORDER_DATE, pl.LINE_NO, pl.PART_ID, pl.SERVICE_ID, pl.PURCHASE_UM, pl.UNIT_PRICE AS po_unit_price,
            COALESCE(pd.DEL_SCHED_LINE_NO, 0) AS del_sched_line_no,
            COALESCE(pd.ORDER_QTY, pl.ORDER_QTY, 0) AS sched_order_qty,
            COALESCE(pd.RECEIVED_QTY, 0) AS sched_received_qty,
@@ -50,7 +62,7 @@ Parameters:
         AND pd.PURC_ORDER_LINE_NO = pl.LINE_NO
     WHERE ISNULL(p.STATUS, '') NOT IN ('X','C')
       AND ISNULL(pl.LINE_STATUS, '') NOT IN ('X','C')
-      AND pl.PART_ID IS NOT NULL
+      AND (pl.PART_ID IS NOT NULL OR pl.SERVICE_ID IS NOT NULL)
       AND (@Site IS NULL OR @Site='' OR p.SITE_ID = @Site)
 ),
 open_qty AS (
@@ -75,7 +87,7 @@ aged AS (
     FROM open_qty o
 )
 SELECT a.SITE_ID, a.po_id, a.LINE_NO, a.buyer, a.VENDOR_ID,
-       v.NAME AS vendor_name, a.PART_ID, psv.DESCRIPTION AS part_description,
+       v.NAME AS vendor_name, a.PART_ID, a.SERVICE_ID, psv.DESCRIPTION AS part_description,
        a.ORDER_DATE, a.target_recv_date, a.days_past_due, a.aging_bucket,
        a.PURCHASE_UM, a.sched_order_qty, a.sched_received_qty, a.open_qty_purchase_um,
        a.po_unit_price, (a.open_qty_purchase_um * a.po_unit_price) AS open_value,
@@ -88,8 +100,7 @@ FROM aged a
 LEFT JOIN VENDOR v ON v.ID = a.VENDOR_ID
 LEFT JOIN PART_SITE_VIEW psv ON psv.SITE_ID = a.SITE_ID AND psv.PART_ID = a.PART_ID
 LEFT JOIN sales_linked_parts slp ON slp.SITE_ID = a.SITE_ID AND slp.PART_ID = a.PART_ID
-WHERE a.days_past_due > 0
-  AND (@Buyer IS NULL OR @Buyer='' OR a.buyer = @Buyer)
+WHERE (@Buyer IS NULL OR @Buyer='' OR a.buyer = @Buyer)
 ORDER BY
     CASE a.aging_bucket WHEN '61+' THEN 1 WHEN '31-60' THEN 2 WHEN '15-30' THEN 3
         WHEN '8-14' THEN 4 WHEN '0-7' THEN 5 ELSE 6 END,
@@ -110,6 +121,7 @@ ORDER BY
         <Field Name="VENDOR_ID"><DataField>VENDOR_ID</DataField><rd:TypeName>System.String</rd:TypeName></Field>
         <Field Name="vendor_name"><DataField>vendor_name</DataField><rd:TypeName>System.String</rd:TypeName></Field>
         <Field Name="PART_ID"><DataField>PART_ID</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="SERVICE_ID"><DataField>SERVICE_ID</DataField><rd:TypeName>System.String</rd:TypeName></Field>
         <Field Name="part_description"><DataField>part_description</DataField><rd:TypeName>System.String</rd:TypeName></Field>
         <Field Name="ORDER_DATE"><DataField>ORDER_DATE</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
         <Field Name="target_recv_date"><DataField>target_recv_date</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
@@ -131,9 +143,9 @@ ORDER BY
     <ReportSection>
       <Body>
         <ReportItems>
-          <Textbox Name="txtTitle"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Past-Due PO Follow-up</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>16pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph></Paragraphs><Top>0in</Top><Left>0in</Left><Height>0.3in</Height><Width>6in</Width><ZIndex>1</ZIndex><Style /></Textbox>
+          <Textbox Name="txtTitle"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Open PO List</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>16pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph></Paragraphs><Top>0in</Top><Left>0in</Left><Height>0.3in</Height><Width>6in</Width><ZIndex>1</ZIndex><Style /></Textbox>
           <Textbox Name="txtSubtitle"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=IIF(Parameters!Site.Value Is Nothing Or Parameters!Site.Value = "", "All Sites", "Site: " &amp; Parameters!Site.Value) &amp; "  |  Buyer: " &amp; IIF(Parameters!Buyer.Value Is Nothing Or Parameters!Buyer.Value = "", "All", Parameters!Buyer.Value) &amp; "  |  As Of: " &amp; Format(Parameters!AsOfDate.Value, "yyyy-MM-dd")</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>10pt</FontSize><Color>#555555</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Top>0.3in</Top><Left>0in</Left><Height>0.25in</Height><Width>15in</Width><ZIndex>2</ZIndex><Style /></Textbox>
-          <Tablix Name="tblxPastDuePO">
+          <Tablix Name="tblxOpenPO">
             <TablixBody>
               <TablixColumns>
                 <TablixColumn><Width>1.6in</Width></TablixColumn>
@@ -176,7 +188,7 @@ ORDER BY
                   <TablixCell><CellContents><Textbox Name="dLn"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!LINE_NO.Value</Value><Style><FontFamily>Segoe UI</FontFamily></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
                   <TablixCell><CellContents><Textbox Name="dBuyer"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!buyer.Value</Value><Style><FontFamily>Segoe UI</FontFamily></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
                   <TablixCell><CellContents><Textbox Name="dVName"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!vendor_name.Value</Value><Style><FontFamily>Segoe UI</FontFamily></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
-                  <TablixCell><CellContents><Textbox Name="dPart"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!PART_ID.Value</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dPart"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=IIF(IsNothing(Fields!SERVICE_ID.Value) OrElse Fields!SERVICE_ID.Value = "", IIF(IsNothing(Fields!PART_ID.Value), "", Fields!PART_ID.Value), IIF(IsNothing(Fields!PART_ID.Value) OrElse Fields!PART_ID.Value = "", Fields!SERVICE_ID.Value, Fields!SERVICE_ID.Value &amp; " | " &amp; Fields!PART_ID.Value))</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
                   <TablixCell><CellContents><Textbox Name="dDesc"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!part_description.Value</Value><Style><FontFamily>Segoe UI</FontFamily></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
                   <TablixCell><CellContents><Textbox Name="dOrd"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!ORDER_DATE.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>yyyy-MM-dd</Format></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
                   <TablixCell><CellContents><Textbox Name="dRecv"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!target_recv_date.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>yyyy-MM-dd</Format></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
@@ -189,7 +201,7 @@ ORDER BY
             <TablixColumnHierarchy><TablixMembers><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /></TablixMembers></TablixColumnHierarchy>
             <TablixRowHierarchy><TablixMembers><TablixMember><KeepWithGroup>After</KeepWithGroup><RepeatOnNewPage>true</RepeatOnNewPage></TablixMember><TablixMember><Group Name="Details" /></TablixMember></TablixMembers></TablixRowHierarchy>
             <RepeatColumnHeaders>true</RepeatColumnHeaders>
-            <DataSetName>PastDuePO</DataSetName>
+            <DataSetName>OpenPO</DataSetName>
             <Top>0.7in</Top><Left>0in</Left><Height>0.52in</Height><Width>14.1in</Width><ZIndex>3</ZIndex>
             <Style><Border><Style>None</Style></Border></Style>
           </Tablix>
@@ -200,7 +212,7 @@ ORDER BY
       <Page>
         <PageHeader><Height>0.4in</Height><PrintOnFirstPage>true</PrintOnFirstPage><PrintOnLastPage>true</PrintOnLastPage>
           <ReportItems>
-            <Textbox Name="txtPageTitle"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Past-Due PO Follow-up</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>10pt</FontSize><FontWeight>Bold</FontWeight><Color>#555555</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Top>0.1in</Top><Left>0in</Left><Height>0.25in</Height><Width>5in</Width><ZIndex>0</ZIndex><Style /></Textbox>
+            <Textbox Name="txtPageTitle"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Open PO List</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>10pt</FontSize><FontWeight>Bold</FontWeight><Color>#555555</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Top>0.1in</Top><Left>0in</Left><Height>0.25in</Height><Width>5in</Width><ZIndex>0</ZIndex><Style /></Textbox>
             <Textbox Name="txtPageNum"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Globals!PageNumber &amp; " of " &amp; Globals!TotalPages</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>9pt</FontSize><Color>#555555</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Top>0.1in</Top><Left>13in</Left><Height>0.25in</Height><Width>2in</Width><ZIndex>1</ZIndex><Style /></Textbox>
           </ReportItems><Style />
         </PageHeader>
@@ -211,7 +223,7 @@ ORDER BY
       </Page>
     </ReportSection>
   </ReportSections>
-  <rd:ReportID>f5a6b7c8-d9e0-1234-f012-567890123456</rd:ReportID>
+  <rd:ReportID>aabbccdd-eeff-1122-3344-556677889900</rd:ReportID>
   <ReportParametersLayout>
     <GridLayoutDefinition>
       <NumberOfColumns>3</NumberOfColumns>

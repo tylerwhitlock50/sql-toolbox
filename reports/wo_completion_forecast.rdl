@@ -14,17 +14,17 @@ Audience: CSR, sales, plant manager.
 Parameters: Site (blank = all)
 ===============================================================================
 -->
-<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2010/01/reportdefinition"
-        xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+<Report MustUnderstand="df"
+        xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition"
+        xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner"
+        xmlns:df="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition/defaultfontfamily">
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <df:DefaultFontFamily>Segoe UI</df:DefaultFontFamily>
   <AutoRefresh>0</AutoRefresh>
   <DataSources>
     <DataSource Name="VECA">
-      <ConnectionProperties>
-        <DataProvider>SQL</DataProvider>
-        <ConnectString>Data Source=YOUR_SERVER;Initial Catalog=VECA</ConnectString>
-        <IntegratedSecurity>true</IntegratedSecurity>
-      </ConnectionProperties>
-      <rd:SecurityType>Integrated</rd:SecurityType>
+      <rd:SecurityType>None</rd:SecurityType>
+      <DataSourceReference>/VECA</DataSourceReference>
       <rd:DataSourceID>6f4e2c8a-9d31-4b67-8a22-1e8f7c2d3e91</rd:DataSourceID>
     </DataSource>
   </DataSources>
@@ -237,5 +237,14 @@ ORDER BY
       </Page>
     </ReportSection>
   </ReportSections>
-  <ReportID>e0f1a2b3-c4d5-6789-4567-012345678901</ReportID>
+  <rd:ReportID>e0f1a2b3-c4d5-6789-4567-012345678901</rd:ReportID>
+  <ReportParametersLayout>
+    <GridLayoutDefinition>
+      <NumberOfColumns>1</NumberOfColumns>
+      <NumberOfRows>1</NumberOfRows>
+      <CellDefinitions>
+        <CellDefinition><ColumnIndex>0</ColumnIndex><RowIndex>0</RowIndex><ParameterName>Site</ParameterName></CellDefinition>
+      </CellDefinitions>
+    </GridLayoutDefinition>
+  </ReportParametersLayout>
 </Report>

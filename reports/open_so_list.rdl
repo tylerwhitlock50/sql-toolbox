@@ -1,0 +1,328 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Report MustUnderstand="df"
+        xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition"
+        xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner"
+        xmlns:df="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition/defaultfontfamily">
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>b7c8d9e0-f1a2-3456-1234-789012345678</rd:ReportID>
+  <df:DefaultFontFamily>Segoe UI</df:DefaultFontFamily>
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="VECA">
+      <rd:SecurityType>None</rd:SecurityType>
+      <DataSourceReference>/VECA</DataSourceReference>
+      <rd:DataSourceID>6f4e2c8a-9d31-4b67-8a22-1e8f7c2d3e91</rd:DataSourceID>
+    </DataSource>
+  </DataSources>
+  <DataSets>
+    <DataSet Name="OpenSO">
+      <Query>
+        <DataSourceName>VECA</DataSourceName>
+        <CommandText><![CDATA[
+SELECT
+    h.SITE_ID,
+    h.ID                AS order_id,
+    h.CUSTOMER_ID,
+    c.NAME              AS customer_name,
+    h.CUSTOMER_PO_REF,
+    h.STATUS            AS order_status,
+    h.ORDER_DATE,
+    l.LINE_NO,
+    l.PART_ID,
+    psv.DESCRIPTION     AS part_description,
+    l.LINE_STATUS,
+    l.PRODUCT_CODE,
+    l.COMMODITY_CODE,
+    l.WAREHOUSE_ID,
+    l.ORDER_QTY,
+    ISNULL(l.TOTAL_SHIPPED_QTY, 0) AS total_shipped_qty,
+    l.ORDER_QTY - ISNULL(l.TOTAL_SHIPPED_QTY, 0) AS open_qty_raw,
+    CASE
+        WHEN l.ORDER_QTY - ISNULL(l.TOTAL_SHIPPED_QTY, 0) < 0 THEN 0
+        ELSE l.ORDER_QTY - ISNULL(l.TOTAL_SHIPPED_QTY, 0)
+    END AS to_ship_qty,
+    l.UNIT_PRICE,
+    CAST(
+        CASE
+            WHEN l.ORDER_QTY - ISNULL(l.TOTAL_SHIPPED_QTY, 0) < 0 THEN 0
+            ELSE (l.ORDER_QTY - ISNULL(l.TOTAL_SHIPPED_QTY, 0)) * ISNULL(l.UNIT_PRICE, 0)
+        END AS decimal(23,2)) AS open_dollars,
+    COALESCE(l.DESIRED_SHIP_DATE, h.DESIRED_SHIP_DATE) AS desired_ship_date,
+    COALESCE(l.PROMISE_DATE,      h.PROMISE_DATE)      AS promise_date,
+    COALESCE(l.PROMISE_DEL_DATE,  h.PROMISE_DEL_DATE)  AS promise_del_date,
+    DATEDIFF(
+        DAY,
+        COALESCE(l.DESIRED_SHIP_DATE, h.DESIRED_SHIP_DATE),
+        CAST(GETDATE() AS DATE)
+    ) AS aging_days,
+    CASE
+        WHEN COALESCE(l.DESIRED_SHIP_DATE, h.DESIRED_SHIP_DATE) IS NULL THEN 'NO DATE'
+        WHEN DATEDIFF(DAY, COALESCE(l.DESIRED_SHIP_DATE, h.DESIRED_SHIP_DATE), CAST(GETDATE() AS DATE)) > 30 THEN '31+ days late'
+        WHEN DATEDIFF(DAY, COALESCE(l.DESIRED_SHIP_DATE, h.DESIRED_SHIP_DATE), CAST(GETDATE() AS DATE)) > 14 THEN '15-30 days late'
+        WHEN DATEDIFF(DAY, COALESCE(l.DESIRED_SHIP_DATE, h.DESIRED_SHIP_DATE), CAST(GETDATE() AS DATE)) > 7  THEN '8-14 days late'
+        WHEN DATEDIFF(DAY, COALESCE(l.DESIRED_SHIP_DATE, h.DESIRED_SHIP_DATE), CAST(GETDATE() AS DATE)) > 0  THEN '1-7 days late'
+        WHEN DATEDIFF(DAY, COALESCE(l.DESIRED_SHIP_DATE, h.DESIRED_SHIP_DATE), CAST(GETDATE() AS DATE)) = 0  THEN 'Due today'
+        WHEN DATEDIFF(DAY, COALESCE(l.DESIRED_SHIP_DATE, h.DESIRED_SHIP_DATE), CAST(GETDATE() AS DATE)) >= -7 THEN 'Due this week'
+        ELSE 'Due later'
+    END AS aging_bucket
+FROM CUSTOMER_ORDER h
+INNER JOIN CUST_ORDER_LINE l
+    ON h.ID = l.CUST_ORDER_ID
+LEFT JOIN CUSTOMER c
+    ON c.ID = h.CUSTOMER_ID
+LEFT JOIN PART_SITE_VIEW psv
+    ON psv.SITE_ID = h.SITE_ID
+   AND psv.PART_ID = l.PART_ID
+WHERE
+    h.STATUS IN ('R', 'F')
+    AND l.LINE_STATUS = 'A'
+    AND l.ORDER_QTY - ISNULL(l.TOTAL_SHIPPED_QTY, 0) > 0
+    AND l.PART_ID IS NOT NULL
+    AND (@Site IS NULL OR @Site = '' OR h.SITE_ID = @Site)
+    AND (@Customer IS NULL OR @Customer = '' OR h.CUSTOMER_ID = @Customer)
+    AND (@PartId IS NULL OR @PartId = '' OR l.PART_ID = @PartId)
+    AND (@SONumber IS NULL OR @SONumber = '' OR h.ID = @SONumber)
+    AND (@ProductCode IS NULL OR @ProductCode = '' OR l.PRODUCT_CODE = @ProductCode)
+    AND (@CommodityCode IS NULL OR @CommodityCode = '' OR l.COMMODITY_CODE = @CommodityCode)
+    AND (@AgingMin IS NULL OR DATEDIFF(DAY, COALESCE(l.DESIRED_SHIP_DATE, h.DESIRED_SHIP_DATE), CAST(GETDATE() AS DATE)) >= @AgingMin)
+    AND (@AgingMax IS NULL OR DATEDIFF(DAY, COALESCE(l.DESIRED_SHIP_DATE, h.DESIRED_SHIP_DATE), CAST(GETDATE() AS DATE)) <= @AgingMax)
+    AND (@OpenDollarsOnly = 0
+         OR (CASE
+                 WHEN l.ORDER_QTY - ISNULL(l.TOTAL_SHIPPED_QTY, 0) < 0 THEN 0
+                 ELSE (l.ORDER_QTY - ISNULL(l.TOTAL_SHIPPED_QTY, 0)) * ISNULL(l.UNIT_PRICE, 0)
+             END) > 0)
+ORDER BY
+    h.SITE_ID,
+    COALESCE(l.DESIRED_SHIP_DATE, h.DESIRED_SHIP_DATE),
+    h.ID,
+    l.LINE_NO;
+        ]]></CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@Site"><Value>=Parameters!Site.Value</Value></QueryParameter>
+          <QueryParameter Name="@Customer"><Value>=Parameters!Customer.Value</Value></QueryParameter>
+          <QueryParameter Name="@PartId"><Value>=Parameters!PartId.Value</Value></QueryParameter>
+          <QueryParameter Name="@SONumber"><Value>=Parameters!SONumber.Value</Value></QueryParameter>
+          <QueryParameter Name="@ProductCode"><Value>=Parameters!ProductCode.Value</Value></QueryParameter>
+          <QueryParameter Name="@CommodityCode"><Value>=Parameters!CommodityCode.Value</Value></QueryParameter>
+          <QueryParameter Name="@AgingMin"><Value>=Parameters!AgingMin.Value</Value></QueryParameter>
+          <QueryParameter Name="@AgingMax"><Value>=Parameters!AgingMax.Value</Value></QueryParameter>
+          <QueryParameter Name="@OpenDollarsOnly"><Value>=Parameters!OpenDollarsOnly.Value</Value></QueryParameter>
+        </QueryParameters>
+        <rd:UseGenericDesigner>true</rd:UseGenericDesigner>
+      </Query>
+      <Fields>
+        <Field Name="SITE_ID"><rd:TypeName>System.String</rd:TypeName><DataField>SITE_ID</DataField></Field>
+        <Field Name="order_id"><rd:TypeName>System.String</rd:TypeName><DataField>order_id</DataField></Field>
+        <Field Name="CUSTOMER_ID"><rd:TypeName>System.String</rd:TypeName><DataField>CUSTOMER_ID</DataField></Field>
+        <Field Name="customer_name"><rd:TypeName>System.String</rd:TypeName><DataField>customer_name</DataField></Field>
+        <Field Name="CUSTOMER_PO_REF"><rd:TypeName>System.String</rd:TypeName><DataField>CUSTOMER_PO_REF</DataField></Field>
+        <Field Name="order_status"><rd:TypeName>System.String</rd:TypeName><DataField>order_status</DataField></Field>
+        <Field Name="ORDER_DATE"><rd:TypeName>System.DateTime</rd:TypeName><DataField>ORDER_DATE</DataField></Field>
+        <Field Name="LINE_NO"><rd:TypeName>System.Int16</rd:TypeName><DataField>LINE_NO</DataField></Field>
+        <Field Name="PART_ID"><rd:TypeName>System.String</rd:TypeName><DataField>PART_ID</DataField></Field>
+        <Field Name="part_description"><rd:TypeName>System.String</rd:TypeName><DataField>part_description</DataField></Field>
+        <Field Name="LINE_STATUS"><rd:TypeName>System.String</rd:TypeName><DataField>LINE_STATUS</DataField></Field>
+        <Field Name="PRODUCT_CODE"><rd:TypeName>System.String</rd:TypeName><DataField>PRODUCT_CODE</DataField></Field>
+        <Field Name="COMMODITY_CODE"><rd:TypeName>System.String</rd:TypeName><DataField>COMMODITY_CODE</DataField></Field>
+        <Field Name="WAREHOUSE_ID"><rd:TypeName>System.String</rd:TypeName><DataField>WAREHOUSE_ID</DataField></Field>
+        <Field Name="ORDER_QTY"><rd:TypeName>System.Decimal</rd:TypeName><DataField>ORDER_QTY</DataField></Field>
+        <Field Name="total_shipped_qty"><rd:TypeName>System.Decimal</rd:TypeName><DataField>total_shipped_qty</DataField></Field>
+        <Field Name="open_qty_raw"><rd:TypeName>System.Decimal</rd:TypeName><DataField>open_qty_raw</DataField></Field>
+        <Field Name="to_ship_qty"><rd:TypeName>System.Decimal</rd:TypeName><DataField>to_ship_qty</DataField></Field>
+        <Field Name="UNIT_PRICE"><rd:TypeName>System.Decimal</rd:TypeName><DataField>UNIT_PRICE</DataField></Field>
+        <Field Name="open_dollars"><rd:TypeName>System.Decimal</rd:TypeName><DataField>open_dollars</DataField></Field>
+        <Field Name="desired_ship_date"><rd:TypeName>System.DateTime</rd:TypeName><DataField>desired_ship_date</DataField></Field>
+        <Field Name="promise_date"><rd:TypeName>System.DateTime</rd:TypeName><DataField>promise_date</DataField></Field>
+        <Field Name="promise_del_date"><rd:TypeName>System.DateTime</rd:TypeName><DataField>promise_del_date</DataField></Field>
+        <Field Name="aging_days"><rd:TypeName>System.Int32</rd:TypeName><DataField>aging_days</DataField></Field>
+        <Field Name="aging_bucket"><rd:TypeName>System.String</rd:TypeName><DataField>aging_bucket</DataField></Field>
+      </Fields>
+    </DataSet>
+  </DataSets>
+  <ReportParameters>
+    <ReportParameter Name="Site">
+      <DataType>String</DataType>
+      <Nullable>true</Nullable>
+      <AllowBlank>true</AllowBlank>
+      <DefaultValue><Values><Value xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" /></Values></DefaultValue>
+      <Prompt>Site (blank = all)</Prompt>
+    </ReportParameter>
+    <ReportParameter Name="Customer">
+      <DataType>String</DataType>
+      <Nullable>true</Nullable>
+      <AllowBlank>true</AllowBlank>
+      <DefaultValue><Values><Value xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" /></Values></DefaultValue>
+      <Prompt>Customer (blank = all)</Prompt>
+    </ReportParameter>
+    <ReportParameter Name="PartId">
+      <DataType>String</DataType>
+      <Nullable>true</Nullable>
+      <AllowBlank>true</AllowBlank>
+      <DefaultValue><Values><Value xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" /></Values></DefaultValue>
+      <Prompt>Part ID (blank = all)</Prompt>
+    </ReportParameter>
+    <ReportParameter Name="SONumber">
+      <DataType>String</DataType>
+      <Nullable>true</Nullable>
+      <AllowBlank>true</AllowBlank>
+      <DefaultValue><Values><Value xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" /></Values></DefaultValue>
+      <Prompt>SO Number (blank = all)</Prompt>
+    </ReportParameter>
+    <ReportParameter Name="ProductCode">
+      <DataType>String</DataType>
+      <Nullable>true</Nullable>
+      <AllowBlank>true</AllowBlank>
+      <DefaultValue><Values><Value xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" /></Values></DefaultValue>
+      <Prompt>Product Code (blank = all)</Prompt>
+    </ReportParameter>
+    <ReportParameter Name="CommodityCode">
+      <DataType>String</DataType>
+      <Nullable>true</Nullable>
+      <AllowBlank>true</AllowBlank>
+      <DefaultValue><Values><Value xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" /></Values></DefaultValue>
+      <Prompt>Commodity Code (blank = all)</Prompt>
+    </ReportParameter>
+    <ReportParameter Name="AgingMin">
+      <DataType>Integer</DataType>
+      <Nullable>true</Nullable>
+      <DefaultValue><Values><Value xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" /></Values></DefaultValue>
+      <Prompt>Aging Days &gt;= (blank = no min)</Prompt>
+    </ReportParameter>
+    <ReportParameter Name="AgingMax">
+      <DataType>Integer</DataType>
+      <Nullable>true</Nullable>
+      <DefaultValue><Values><Value xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" /></Values></DefaultValue>
+      <Prompt>Aging Days &lt;= (blank = no max)</Prompt>
+    </ReportParameter>
+    <ReportParameter Name="OpenDollarsOnly">
+      <DataType>Boolean</DataType>
+      <DefaultValue><Values><Value>true</Value></Values></DefaultValue>
+      <Prompt>Open $ &gt; 0 only</Prompt>
+    </ReportParameter>
+  </ReportParameters>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <ReportItems>
+          <Textbox Name="txtTitle"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Open Sales Order List</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>16pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph></Paragraphs><Top>0in</Top><Left>0in</Left><Height>0.3in</Height><Width>6in</Width><ZIndex>1</ZIndex><Style /></Textbox>
+          <Textbox Name="txtSubtitle"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=IIF(Parameters!Site.Value Is Nothing Or Parameters!Site.Value = "", "All Sites", "Site: " &amp; Parameters!Site.Value) &amp; "  |  " &amp; IIF(Parameters!Customer.Value Is Nothing Or Parameters!Customer.Value = "", "All Customers", "Customer: " &amp; Parameters!Customer.Value) &amp; "  |  As Of: " &amp; Format(Today(), "yyyy-MM-dd")</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>10pt</FontSize><Color>#555555</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Top>0.3in</Top><Left>0in</Left><Height>0.25in</Height><Width>15in</Width><ZIndex>2</ZIndex><Style /></Textbox>
+          <Tablix Name="tblxOpenSO">
+            <TablixBody>
+              <TablixColumns>
+                <TablixColumn><Width>0.5in</Width></TablixColumn>
+                <TablixColumn><Width>0.7in</Width></TablixColumn>
+                <TablixColumn><Width>0.4in</Width></TablixColumn>
+                <TablixColumn><Width>0.7in</Width></TablixColumn>
+                <TablixColumn><Width>1.6in</Width></TablixColumn>
+                <TablixColumn><Width>1.0in</Width></TablixColumn>
+                <TablixColumn><Width>1.2in</Width></TablixColumn>
+                <TablixColumn><Width>1.8in</Width></TablixColumn>
+                <TablixColumn><Width>0.9in</Width></TablixColumn>
+                <TablixColumn><Width>0.9in</Width></TablixColumn>
+                <TablixColumn><Width>0.6in</Width></TablixColumn>
+                <TablixColumn><Width>0.7in</Width></TablixColumn>
+                <TablixColumn><Width>0.7in</Width></TablixColumn>
+                <TablixColumn><Width>0.8in</Width></TablixColumn>
+                <TablixColumn><Width>0.9in</Width></TablixColumn>
+                <TablixColumn><Width>1.1in</Width></TablixColumn>
+              </TablixColumns>
+              <TablixRows>
+                <TablixRow><Height>0.3in</Height><TablixCells>
+                  <TablixCell><CellContents><Textbox Name="hSite"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Site</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hSO"><Paragraphs><Paragraph><TextRuns><TextRun><Value>SO</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hLn"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Ln</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hCustId"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Cust ID</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hCust"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Customer</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hPO"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Cust PO</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hPart"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Part</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hDesc"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Description</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hOrdDate"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Order Date</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hShip"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Desired Ship</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hAge"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Aging</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hOrdQ"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Order Qty</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hShipQ"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Shipped</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hOpenQ"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Open Qty</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hPrice"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Unit Price</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="hVal"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Open $</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>White</Color><Style>Solid</Style></Border><BackgroundColor>#2F5496</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                </TablixCells></TablixRow>
+                <TablixRow><Height>0.22in</Height><TablixCells>
+                  <TablixCell><CellContents><Textbox Name="dSite"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!SITE_ID.Value</Value><Style><FontFamily>Segoe UI</FontFamily></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dSO"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!order_id.Value</Value><Style><FontFamily>Consolas</FontFamily><FontSize>9pt</FontSize></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dLn"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!LINE_NO.Value</Value><Style><FontFamily>Segoe UI</FontFamily></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dCustId"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!CUSTOMER_ID.Value</Value><Style><FontFamily>Segoe UI</FontFamily></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dCust"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!customer_name.Value</Value><Style><FontFamily>Segoe UI</FontFamily></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dPO"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!CUSTOMER_PO_REF.Value</Value><Style><FontFamily>Segoe UI</FontFamily></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dPart"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!PART_ID.Value</Value><Style><FontFamily>Segoe UI</FontFamily><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dDesc"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!part_description.Value</Value><Style><FontFamily>Segoe UI</FontFamily></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dOrdDate"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!ORDER_DATE.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>yyyy-MM-dd</Format></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dShip"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!desired_ship_date.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>yyyy-MM-dd</Format></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dAge"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!aging_days.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N0</Format><Color>=IIF(Fields!aging_days.Value &gt; 30,"Red", IIF(Fields!aging_days.Value &gt; 0,"#C75B12","Black"))</Color><FontWeight>=IIF(Fields!aging_days.Value &gt; 0,"Bold","Normal")</FontWeight></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dOrdQ"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!ORDER_QTY.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N0</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dShipQ"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!total_shipped_qty.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N0</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dOpenQ"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!to_ship_qty.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N0</Format><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dPrice"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!UNIT_PRICE.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N2</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="dVal"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!open_dollars.Value</Value><Style><FontFamily>Segoe UI</FontFamily><Format>C0</Format><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                </TablixCells></TablixRow>
+                <TablixRow><Height>0.28in</Height><TablixCells>
+                  <TablixCell><CellContents><Textbox Name="fLabel1"><Paragraphs><Paragraph><TextRuns><TextRun><Value /></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Style>None</Style></Border></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fLabel2"><Paragraphs><Paragraph><TextRuns><TextRun><Value /></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Style>None</Style></Border></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fLabel3"><Paragraphs><Paragraph><TextRuns><TextRun><Value /></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Style>None</Style></Border></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fLabel4"><Paragraphs><Paragraph><TextRuns><TextRun><Value /></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Style>None</Style></Border></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fLabel5"><Paragraphs><Paragraph><TextRuns><TextRun><Value /></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Style>None</Style></Border></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fLabel6"><Paragraphs><Paragraph><TextRuns><TextRun><Value /></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Style>None</Style></Border></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fLabel7"><Paragraphs><Paragraph><TextRuns><TextRun><Value /></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Style>None</Style></Border></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fLabel8"><Paragraphs><Paragraph><TextRuns><TextRun><Value /></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Style>None</Style></Border></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fLabel9"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Total:</Value><Style><FontWeight>Bold</FontWeight><FontFamily>Segoe UI</FontFamily></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fLabel10"><Paragraphs><Paragraph><TextRuns><TextRun><Value /></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Style>None</Style></Border></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fLabel11"><Paragraphs><Paragraph><TextRuns><TextRun><Value /></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Style>None</Style></Border></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fOrdQ"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Sum(Fields!ORDER_QTY.Value)</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N0</Format><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><BackgroundColor>#EEEEEE</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fShipQ"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Sum(Fields!total_shipped_qty.Value)</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N0</Format><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><BackgroundColor>#EEEEEE</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fOpenQ"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Sum(Fields!to_ship_qty.Value)</Value><Style><FontFamily>Segoe UI</FontFamily><Format>N0</Format><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><BackgroundColor>#EEEEEE</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fPrice"><Paragraphs><Paragraph><TextRuns><TextRun><Value /></TextRun></TextRuns></Paragraph></Paragraphs><Style><Border><Style>None</Style></Border></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="fVal"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Sum(Fields!open_dollars.Value)</Value><Style><FontFamily>Segoe UI</FontFamily><Format>C0</Format><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Color>LightGray</Color><Style>Solid</Style></Border><BackgroundColor>#EEEEEE</BackgroundColor><PaddingRight>4pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                </TablixCells></TablixRow>
+              </TablixRows>
+            </TablixBody>
+            <TablixColumnHierarchy><TablixMembers><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /></TablixMembers></TablixColumnHierarchy>
+            <TablixRowHierarchy><TablixMembers><TablixMember><KeepWithGroup>After</KeepWithGroup><RepeatOnNewPage>true</RepeatOnNewPage></TablixMember><TablixMember><Group Name="Details" /></TablixMember><TablixMember><KeepWithGroup>Before</KeepWithGroup></TablixMember></TablixMembers></TablixRowHierarchy>
+            <RepeatColumnHeaders>true</RepeatColumnHeaders>
+            <DataSetName>OpenSO</DataSetName>
+            <Top>0.7in</Top><Left>0in</Left><Height>0.8in</Height><Width>14.5in</Width><ZIndex>3</ZIndex>
+            <Style><Border><Style>None</Style></Border></Style>
+          </Tablix>
+        </ReportItems>
+        <Height>2in</Height><Style />
+      </Body>
+      <Width>15in</Width>
+      <Page>
+        <PageHeader><Height>0.4in</Height><PrintOnFirstPage>true</PrintOnFirstPage><PrintOnLastPage>true</PrintOnLastPage>
+          <ReportItems>
+            <Textbox Name="txtPageTitle"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Open Sales Order List</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>10pt</FontSize><FontWeight>Bold</FontWeight><Color>#555555</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Top>0.1in</Top><Left>0in</Left><Height>0.25in</Height><Width>5in</Width><ZIndex>0</ZIndex><Style /></Textbox>
+            <Textbox Name="txtPageNum"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Globals!PageNumber &amp; " of " &amp; Globals!TotalPages</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>9pt</FontSize><Color>#555555</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Top>0.1in</Top><Left>13in</Left><Height>0.25in</Height><Width>2in</Width><ZIndex>1</ZIndex><Style /></Textbox>
+          </ReportItems><Style />
+        </PageHeader>
+        <PageHeight>8.5in</PageHeight><PageWidth>16in</PageWidth>
+        <LeftMargin>0.5in</LeftMargin><RightMargin>0.5in</RightMargin>
+        <TopMargin>0.5in</TopMargin><BottomMargin>0.5in</BottomMargin>
+        <ColumnSpacing>0.13in</ColumnSpacing><Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <ReportParametersLayout>
+    <GridLayoutDefinition>
+      <NumberOfColumns>3</NumberOfColumns>
+      <NumberOfRows>3</NumberOfRows>
+      <CellDefinitions>
+        <CellDefinition><ColumnIndex>0</ColumnIndex><RowIndex>0</RowIndex><ParameterName>Site</ParameterName></CellDefinition>
+        <CellDefinition><ColumnIndex>1</ColumnIndex><RowIndex>0</RowIndex><ParameterName>Customer</ParameterName></CellDefinition>
+        <CellDefinition><ColumnIndex>2</ColumnIndex><RowIndex>0</RowIndex><ParameterName>PartId</ParameterName></CellDefinition>
+        <CellDefinition><ColumnIndex>0</ColumnIndex><RowIndex>1</RowIndex><ParameterName>SONumber</ParameterName></CellDefinition>
+        <CellDefinition><ColumnIndex>1</ColumnIndex><RowIndex>1</RowIndex><ParameterName>ProductCode</ParameterName></CellDefinition>
+        <CellDefinition><ColumnIndex>2</ColumnIndex><RowIndex>1</RowIndex><ParameterName>CommodityCode</ParameterName></CellDefinition>
+        <CellDefinition><ColumnIndex>0</ColumnIndex><RowIndex>2</RowIndex><ParameterName>AgingMin</ParameterName></CellDefinition>
+        <CellDefinition><ColumnIndex>1</ColumnIndex><RowIndex>2</RowIndex><ParameterName>AgingMax</ParameterName></CellDefinition>
+        <CellDefinition><ColumnIndex>2</ColumnIndex><RowIndex>2</RowIndex><ParameterName>OpenDollarsOnly</ParameterName></CellDefinition>
+      </CellDefinitions>
+    </GridLayoutDefinition>
+  </ReportParametersLayout>
+</Report>
