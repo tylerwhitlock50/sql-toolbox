@@ -1,0 +1,72 @@
+﻿queries/domains/diagnostics/diagnose_exchange_subscriptions.sql	SKIP_MULTI	28 top-level statements
+queries/domains/diagnostics/diagnose_single_invoice_exchange_failure.sql	SKIP_MULTI	13 top-level statements
+queries/domains/diagnostics/diagnose_veca_vfin_overlap.sql	SKIP_MULTI	7 top-level statements
+queries/domains/gl/chart_of_accounts.sql	PASS	0.0s
+queries/domains/gl/gl_balance_export.sql	PASS	0.0s
+queries/domains/gl/gl_posting_map.sql	PASS	0.3s
+queries/domains/gl/gl_posting_map_enriched.sql	PASS	0.0s
+queries/domains/gl/gl_posting_today.sql	SKIP_MULTI	3 top-level statements
+queries/domains/gl/trial_balance.sql	PASS	0.1s
+queries/domains/inventory/fix_scripts/1-update_qty_on_hand.sql	SKIP_FIX_SCRIPT	write scripts (per user rule)
+queries/domains/inventory/fix_scripts/1.5-Missing_location_parts.sql	SKIP_FIX_SCRIPT	write scripts (per user rule)
+queries/domains/inventory/fix_scripts/2-match_requirement_status.sql	SKIP_FIX_SCRIPT	write scripts (per user rule)
+queries/domains/inventory/fix_scripts/3-update_qty_in_demand.sql	SKIP_FIX_SCRIPT	write scripts (per user rule)
+queries/domains/inventory/fix_scripts/find_missing_location_data.sql	SKIP_FIX_SCRIPT	write scripts (per user rule)
+queries/domains/inventory/fix_scripts/find_missing_location_data_build_fixes.sql	SKIP_FIX_SCRIPT	write scripts (per user rule)
+queries/domains/inventory/part_information/exceptions_report.sql	PASS	0.0s
+queries/domains/inventory/part_information/inventory_vs_part_location_qty_mismatch.sql	SKIP_EMPTY	no statements after inline
+queries/domains/inventory/part_information/planning_information.sql	PASS	18.3s
+queries/domains/inventory/part_information/stocking_policy_recommendations.sql	PASS	1.2s
+queries/domains/production/performance/fg_completion_forecast.sql	PASS	0.6s
+queries/domains/production/performance/labor_productivity_scorecard.sql	PASS	0.9s
+queries/domains/production/performance/open_wo_aging_and_wip.sql	PASS	0.2s
+queries/domains/production/performance/open_wo_list.sql	PASS	0.7s
+queries/domains/production/performance/operation_efficiency_by_resource.sql	PASS	1.1s
+queries/domains/production/performance/schedule_health_by_operation.sql	PASS	0.2s
+queries/domains/production/performance/wo_otd_and_cycle_time.sql	PASS	0.2s
+queries/domains/sales/active_parts_pricelist.sql	PASS	0.0s
+queries/domains/sales/order_information/so_fulfillment_risk.sql	PASS	13.5s
+queries/domains/sales/order_information/so_header_and_lines.sql	PASS	0.0s
+queries/domains/sales/order_information/so_header_and_lines_open_orders.sql	PASS	0.0s
+queries/domains/sales/performance/customer_otd_scorecard.sql	PASS	3.8s
+queries/domains/sales/performance/customer_scorecard.sql	FAIL	(pyodbc.DataError) ('22003', '[22003] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]Arithmetic overflow error converting numeric to data type numeric. (8115) (SQLExecDirectW)')
+queries/domains/sales/performance/demand_trend_monthly.sql	PASS	0.1s
+queries/domains/sales/performance/past_due_so_aging.sql	PASS	0.3s
+queries/domains/sales/performance/sales_trend_monthly.sql	FAIL	(pyodbc.ProgrammingError) ('42000', '[42000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]Cannot perform an aggregate function on an expression containing an aggregate or a subquery. (130) (SQLExecDirectW)')
+queries/domains/sales/performance/salesrep_performance_scorecard.sql	PASS	2.3s
+queries/domains/scheduling/resource_capacity_load.sql	PASS	1.1s
+queries/domains/supply_chain/E&O/historical_E&O_basis.sql	SKIP_MULTI	2 top-level statements
+queries/domains/supply_chain/bom/recursive_bom_all_active_parts.sql	PASS	45.2s
+queries/domains/supply_chain/bom/recursive_bom_from_masters.sql	PASS	0.1s
+queries/domains/supply_chain/bom/recursive_routing_all_active_parts.sql	PASS	3.6s
+queries/domains/supply_chain/bom/recursive_routing_from_masters.sql	PASS	0.1s
+queries/domains/supply_chain/demand/exploded_gross_demand.sql	FAIL	(pyodbc.OperationalError) ('HYT00', '[HYT00] [Microsoft][ODBC Driver 18 for SQL Server]Query timeout expired (0) (SQLExecDirectW)')
+queries/domains/supply_chain/demand/total_demand_by_part.sql	PASS	0.2s
+queries/domains/supply_chain/executive/component_uniqueness.sql	FAIL	(pyodbc.OperationalError) ('HYT00', '[HYT00] [Microsoft][ODBC Driver 18 for SQL Server]Query timeout expired (0) (SQLExecDirectW)')
+queries/domains/supply_chain/executive/executive_supply_chain_kpis.sql	FAIL	(pyodbc.ProgrammingError) ('42000', '[42000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]ORDER BY items must appear in the select list if the statement contains a UNION, INTERSECT or EXCEPT operator. (104) (SQLExecDirectW)')
+queries/domains/supply_chain/executive/product_line_cost_to_serve.sql	FAIL	(pyodbc.OperationalError) ('HYT00', '[HYT00] [Microsoft][ODBC Driver 18 for SQL Server]Query timeout expired (0) (SQLExecDirectW)')
+queries/domains/supply_chain/executive/sku_complexity_scorecard.sql	FAIL	(pyodbc.OperationalError) ('HYT00', '[HYT00] [Microsoft][ODBC Driver 18 for SQL Server]Query timeout expired (0) (SQLExecDirectW)')
+queries/domains/supply_chain/executive/waste_and_stagnation.sql	FAIL	(pyodbc.ProgrammingError) ('42000', "[42000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]No column name was specified for column 1 of 'excess'. (8155) (SQLExecDirectW)")
+queries/domains/supply_chain/performance/buyer_performance_scorecard.sql	PASS	0.8s
+queries/domains/supply_chain/performance/commodity_spend_rollup.sql	PASS	6.5s
+queries/domains/supply_chain/performance/eo_forecast_coverage_months.sql	PASS	4.8s
+queries/domains/supply_chain/performance/material_shortage_vs_open_demand.sql	PASS	1.9s
+queries/domains/supply_chain/performance/part_price_volatility.sql	PASS	35.4s
+queries/domains/supply_chain/performance/past_due_po_aging.sql	PASS	0.2s
+queries/domains/supply_chain/performance/vendor_lead_time_history.sql	PASS	0.3s
+queries/domains/supply_chain/performance/vendor_otd_scorecard.sql	PASS	0.3s
+queries/domains/supply_chain/performance/vendor_scorecard_360.sql	FAIL	(pyodbc.ProgrammingError) ('42000', "[42000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]Column 'INVENTORY_TRANS.TRANSACTION_DATE' is invalid in the select list because it is not contained in either an aggregate function or the GR
+queries/domains/supply_chain/planning/build_priority_by_so.sql	FAIL	(pyodbc.OperationalError) ('HYT00', '[HYT00] [Microsoft][ODBC Driver 18 for SQL Server]Query timeout expired (0) (SQLExecDirectW)')
+queries/domains/supply_chain/planning/make_plan_weekly.sql	FAIL	(pyodbc.OperationalError) ('HYT00', '[HYT00] [Microsoft][ODBC Driver 18 for SQL Server]Query timeout expired (0) (SQLExecDirectW)')
+queries/domains/supply_chain/planning/net_requirements_weekly.sql	FAIL	(pyodbc.OperationalError) ('HYT00', '[HYT00] [Microsoft][ODBC Driver 18 for SQL Server]Query timeout expired (0) (SQLExecDirectW)')
+queries/domains/supply_chain/planning/obsolete_check.sql	PASS	16.5s
+queries/domains/supply_chain/planning/obsolete_explainer.sql	PASS	14.4s
+queries/domains/supply_chain/planning/purchasing_plan.sql	FAIL	(pyodbc.OperationalError) ('HYT00', '[HYT00] [Microsoft][ODBC Driver 18 for SQL Server]Query timeout expired (0) (SQLExecDirectW)')
+queries/domains/supply_chain/planning/purchasing_plan_by_buyer_summary.sql	FAIL	(pyodbc.OperationalError) ('HYT00', '[HYT00] [Microsoft][ODBC Driver 18 for SQL Server]Query timeout expired (0) (SQLExecDirectW)')
+queries/domains/supply_chain/planning/shared_buildable_allocation.sql	FAIL	(pyodbc.OperationalError) ('HYT00', '[HYT00] [Microsoft][ODBC Driver 18 for SQL Server]Query timeout expired (0) (SQLExecDirectW)')
+queries/domains/supply_chain/planning/supplemental_supply.sql	PASS	0.0s
+queries/domains/supply_chain/purchasing/open_and_planned_supply_detail.sql	PASS	0.4s
+queries/domains/supply_chain/purchasing/open_po_list.sql	PASS	0.3s
+queries/domains/supply_chain/purchasing/open_purchase_orders_uom_normalized.sql	PASS	0.2s
+queries/domains/supply_chain/purchasing/part_cost_summary.sql	PASS	6.2s
+queries/domains/supply_chain/purchasing/purchase_price_history_yearly.sql	PASS	1.9s

@@ -260,6 +260,34 @@ shipments_per_line AS (
     WHERE ISNULL(s.STATUS, '') NOT IN ('X','V')
 ),
 
+-- Pre-aggregate shipments per (co_id, line_no, ship_month) so we don't
+-- re-scan SHIPPER for every (so_line, eom) pair in the snapshot CTE.
+ship_per_line_month AS (
+    SELECT
+        spl.co_id,
+        spl.line_no,
+        DATEFROMPARTS(YEAR(spl.SHIPPED_DATE), MONTH(spl.SHIPPED_DATE), 1) AS ship_month,
+        SUM(spl.ship_amount) AS ship_amount_in_month
+    FROM shipments_per_line spl
+    GROUP BY spl.co_id, spl.line_no,
+             DATEFROMPARTS(YEAR(spl.SHIPPED_DATE), MONTH(spl.SHIPPED_DATE), 1)
+),
+
+-- Cumulative shipped-amount through each EOM in the reporting window,
+-- per (co_id, line_no). Triangular join over `<` is unavoidable but
+-- acceptable when the inner inputs are pre-aggregated.
+ship_cum AS (
+    SELECT
+        splm.co_id,
+        splm.line_no,
+        m.month_start AS as_of_month,
+        SUM(splm.ship_amount_in_month) AS shipped_before_eom
+    FROM ship_per_line_month splm
+    INNER JOIN months m
+        ON splm.ship_month < DATEADD(month, 1, m.month_start)
+    GROUP BY splm.co_id, splm.line_no, m.month_start
+),
+
 backlog_snapshot AS (
     SELECT
         sol.SITE_ID,
@@ -270,19 +298,16 @@ backlog_snapshot AS (
                 WHEN sol.ORDER_DATE < DATEADD(month, 1, m.month_start)
                  AND (sol.effective_close_date IS NULL
                       OR sol.effective_close_date >= DATEADD(month, 1, m.month_start))
-                THEN sol.ordered_amount
-                     - COALESCE((
-                         SELECT SUM(spl.ship_amount)
-                         FROM shipments_per_line spl
-                         WHERE spl.co_id   = sol.co_id
-                           AND spl.line_no = sol.LINE_NO
-                           AND spl.SHIPPED_DATE < DATEADD(month, 1, m.month_start)
-                     ), 0)
+                THEN sol.ordered_amount - ISNULL(sc.shipped_before_eom, 0)
                 ELSE 0
             END
         ) AS open_backlog_snapshot_value
     FROM so_lines sol
     CROSS JOIN months m
+    LEFT JOIN ship_cum sc
+        ON sc.co_id      = sol.co_id
+       AND sc.line_no    = sol.LINE_NO
+       AND sc.as_of_month = m.month_start
     GROUP BY sol.SITE_ID, sol.product_code, m.month_start
 )
 

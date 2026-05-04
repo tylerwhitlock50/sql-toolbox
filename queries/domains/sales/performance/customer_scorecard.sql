@@ -200,15 +200,19 @@ ship_cur_agg AS (
         SUM(ship_revenue)                          AS ship_revenue,
         SUM(std_cost_value)                        AS std_cost_value,
         SUM(ship_revenue - std_cost_value)         AS std_margin_amount,
-        CAST(100.0 * SUM(ship_revenue - std_cost_value)
-             / NULLIF(SUM(ship_revenue), 0)
-             AS decimal(5,2))                      AS std_margin_pct,
+        -- Cast via float to avoid SQL Server's decimal-division scale
+        -- escalation that overflows decimal(38,N) on small denominators.
+        -- Use decimal(38,4) for percentage outputs to handle edge-case
+        -- data (sub-cent prior revenue against multi-thousand-dollar current).
+        CAST(100.0 * CAST(SUM(ship_revenue - std_cost_value) AS float)
+             / NULLIF(CAST(SUM(ship_revenue) AS float), 0)
+             AS decimal(38,4))                     AS std_margin_pct,
         SUM(CASE WHEN SHIPPED_DATE <= target_ship_date THEN ship_revenue ELSE 0 END)
                                                    AS on_time_revenue,
-        CAST(100.0 * SUM(CASE WHEN SHIPPED_DATE <= target_ship_date
-                              THEN ship_revenue ELSE 0 END)
-             / NULLIF(SUM(ship_revenue), 0)
-             AS decimal(5,2))                      AS otd_pct_by_revenue
+        CAST(100.0 * CAST(SUM(CASE WHEN SHIPPED_DATE <= target_ship_date
+                                   THEN ship_revenue ELSE 0 END) AS float)
+             / NULLIF(CAST(SUM(ship_revenue) AS float), 0)
+             AS decimal(38,4))                     AS otd_pct_by_revenue
     FROM ship_cur
     GROUP BY SITE_ID, CUSTOMER_ID
 ),
@@ -269,11 +273,11 @@ SELECT
     COALESCE(spa.ship_revenue_prior, 0)           AS ship_revenue_prior,
     CAST(
         CASE WHEN COALESCE(spa.ship_revenue_prior, 0) > 0
-             THEN (COALESCE(sca.ship_revenue, 0) - spa.ship_revenue_prior)
-                  / spa.ship_revenue_prior * 100.0
+             THEN CAST(COALESCE(sca.ship_revenue, 0) - spa.ship_revenue_prior AS float)
+                  / CAST(spa.ship_revenue_prior AS float) * 100.0
              ELSE NULL
         END
-    AS decimal(7,2))                              AS revenue_growth_pct,
+    AS decimal(38,4))                             AS revenue_growth_pct,
 
     -- Margin
     COALESCE(sca.std_cost_value,    0)            AS std_cost_value,

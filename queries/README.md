@@ -22,71 +22,84 @@ This folder is the source of truth for production-ready queries.
 
 ## Current Canonical Inventory
 
-| Domain | Query | Purpose |
-|---|---|---|
-| GL | `domains/gl/gl_posting_map.sql` | Unified VECA + VFIN posting detail |
-| GL | `domains/gl/gl_posting_map_enriched.sql` | Posting detail + account classification |
-| GL | `domains/gl/gl_posting_today.sql` | Daily posting audit |
-| GL | `domains/gl/trial_balance.sql` | Trial balance as-of date |
-| GL | `domains/gl/gl_balance_export.sql` | Period balance export |
-| GL | `domains/gl/chart_of_accounts.sql` | Chart of accounts + mapping checks |
-| Diagnostics | `domains/diagnostics/diagnose_veca_vfin_overlap.sql` | Data overlap diagnostics |
-| Diagnostics | `domains/diagnostics/diagnose_exchange_subscriptions.sql` | Exchange subscription diagnostics |
-| Diagnostics | `domains/diagnostics/diagnose_single_invoice_exchange_failure.sql` | Single invoice Exchange failure deep dive (VECA -> VFIN) |
-| Sales | `domains/sales/order_information/so_header_and_lines.sql` | Customer-order header + line detail |
-| Sales | `domains/sales/order_information/so_header_and_lines_open_orders.sql` | Open customer orders only (canonical filter) |
-| Sales | `domains/sales/order_information/so_fulfillment_risk.sql` | **Per SO line: blocking components + next supply that would unblock** |
-| Sales | `domains/sales/performance/customer_otd_scorecard.sql` | Customer on-time delivery scorecard |
-| Sales | `domains/sales/performance/customer_scorecard.sql` | Customer activity & performance |
-| Sales | `domains/sales/performance/past_due_so_aging.sql` | Past-due SO aging buckets |
-| Sales | `domains/sales/performance/salesrep_performance_scorecard.sql` | Sales rep scorecard |
-| Sales | `domains/sales/performance/sales_trend_monthly.sql` | Monthly sales trend |
-| Sales | `domains/sales/performance/demand_trend_monthly.sql` | **Per-part monthly velocity + T3/T6/T12 trend + Pareto ABC + seasonality** |
-| Inventory | `domains/inventory/part_information/planning_information.sql` | Part-level planning snapshot (on-hand, demand, MRP exceptions) |
-| Inventory | `domains/inventory/part_information/exceptions_report.sql` | Inventory exception analysis |
-| Inventory | `domains/inventory/part_information/inventory_vs_part_location_qty_mismatch.sql` | Reconcile inventory vs part-location qty |
-| Inventory | `domains/inventory/part_information/stocking_policy_recommendations.sql` | **Recommended SS + ROP from demand × LT variability vs current setting** |
-| Production | `domains/production/performance/open_wo_list.sql` | **Full open-WO list (on-time + late) + WIP $ + priority** — feeds `reports/open_wo_list.rdl` |
-| Production | `domains/production/performance/open_wo_aging_and_wip.sql` | Open WO aging + WIP $ (preserved for reference; same row-set as `open_wo_list.sql`) |
-| Production | `domains/production/performance/wo_otd_and_cycle_time.sql` | WO on-time + cycle time |
-| Production | `domains/production/performance/labor_productivity_scorecard.sql` | Labor productivity |
-| Production | `domains/production/performance/operation_efficiency_by_resource.sql` | Resource utilization |
-| Production | `domains/production/performance/schedule_health_by_operation.sql` | Operation schedule health |
-| Production | `domains/production/performance/fg_completion_forecast.sql` | **Open WO finish-date forecast + SO peg + component readiness** |
-| Scheduling | `domains/scheduling/resource_capacity_load.sql` | **Per-resource weekly load vs capacity + bottleneck flag** |
-| Supply Chain | `domains/supply_chain/bom/recursive_bom_from_masters.sql` | Recursive BOM explosion (single top part) |
-| Supply Chain | `domains/supply_chain/bom/recursive_bom_all_active_parts.sql` | Recursive BOM explosion (all active sales parts) |
-| Supply Chain | `domains/supply_chain/bom/recursive_routing_from_masters.sql` | Recursive routing explosion (single top part) |
-| Supply Chain | `domains/supply_chain/bom/recursive_routing_all_active_parts.sql` | Recursive routing explosion (all active parts) |
-| Supply Chain | `domains/supply_chain/demand/total_demand_by_part.sql` | **Unified demand: SO backorder + master schedule + forecast** |
-| Supply Chain | `domains/supply_chain/demand/exploded_gross_demand.sql` | **BOM-exploded component-level gross demand by source** |
-| Supply Chain | `domains/supply_chain/planning/net_requirements_weekly.sql` | **Time-phased MRP grid (gross / receipts / projected / net)** |
-| Supply Chain | `domains/supply_chain/planning/purchasing_plan.sql` | **Recommended POs: vendor, lead time, expected price** |
-| Supply Chain | `domains/supply_chain/planning/build_priority_by_so.sql` | **Per-SO buildability + priority score (isolated)** |
-| Supply Chain | `domains/supply_chain/planning/shared_buildable_allocation.sql` | **Per-SO buildable AFTER priority allocation across competing SOs** |
-| Supply Chain | `domains/supply_chain/planning/purchasing_plan_by_buyer_summary.sql` | **Buyer × week roll-up: parts to order, $ to spend, past-due** |
-| Supply Chain | `domains/supply_chain/planning/make_plan_weekly.sql` | **Fabrication plan: WO release date + qty + component readiness** |
-| Supply Chain | `domains/supply_chain/planning/supplemental_supply.sql` | **Unified open-WO + open-PO supply + open WO requirements (signed) for snapshot netting** |
-| Supply Chain | `domains/supply_chain/purchasing/open_po_list.sql` | **Full open PO list (past-due + not-due) incl. service POs + priority** — feeds `reports/open_po_list.rdl` |
-| Supply Chain | `domains/supply_chain/purchasing/open_and_planned_supply_detail.sql` | Unified open PO + planned supply (UOM normalized) |
-| Supply Chain | `domains/supply_chain/purchasing/open_purchase_orders_uom_normalized.sql` | Open POs with UOM conversion |
-| Supply Chain | `domains/supply_chain/purchasing/part_cost_summary.sql` | Std vs weighted-avg vs last-PO cost |
-| Supply Chain | `domains/supply_chain/purchasing/purchase_price_history_yearly.sql` | Yearly PO receipt price history |
-| Supply Chain | `domains/supply_chain/performance/vendor_otd_scorecard.sql` | Vendor on-time delivery scorecard |
-| Supply Chain | `domains/supply_chain/performance/vendor_lead_time_history.sql` | **Actual lead time stats per (vendor, part); ERP-vs-reality gap** |
-| Supply Chain | `domains/supply_chain/performance/part_price_volatility.sql` | **Monthly price trend + MoM/YoY + trailing-12 volatility** |
-| Supply Chain | `domains/supply_chain/performance/vendor_scorecard_360.sql` | **Consolidated vendor 360 (spend + OTD + LT + price + risk)** |
-| Supply Chain | `domains/supply_chain/performance/commodity_spend_rollup.sql` | **Spend by commodity: top vendors, HHI concentration, inflation flags** |
-| Supply Chain | `domains/supply_chain/performance/buyer_performance_scorecard.sql` | Buyer-level OTD, spend, quality |
-| Supply Chain | `domains/supply_chain/performance/past_due_po_aging.sql` | Past-due PO aging only (preserved for reference; broader version is `../purchasing/open_po_list.sql`) |
-| Supply Chain | `domains/supply_chain/performance/material_shortage_vs_open_demand.sql` | Component shortages tied to SO at risk |
-| Supply Chain | `domains/supply_chain/performance/eo_forecast_coverage_months.sql` | E&O forecast coverage months |
-| Supply Chain | `domains/supply_chain/E&O/historical_E&O_basis.sql` | Historical E&O cost basis |
-| Supply Chain | `domains/supply_chain/executive/waste_and_stagnation.sql` | **Waste report: stagnant, excess, dead, orphan WO, early PO** |
-| Supply Chain | `domains/supply_chain/executive/executive_supply_chain_kpis.sql` | **Per-site CEO KPI snapshot (backlog/WIP/inventory/OTD/turns)** |
-| Supply Chain | `domains/supply_chain/executive/component_uniqueness.sql` | **Per component: how many active FGs use it (variant / family / platform)** |
-| Supply Chain | `domains/supply_chain/executive/sku_complexity_scorecard.sql` | **Per SKU: T12 sales + batch/setup tax + variant-only inventory $** |
-| Supply Chain | `domains/supply_chain/executive/product_line_cost_to_serve.sql` | **Per product line: SKU mix, setup overhead, variation inventory $** |
+`Status` reflects the most recent automated validation run
+(`tools/validate_all.py`, see `tools/validation_results.md`).
+
+- `PASS` — single-statement SELECT/WITH, executed and returned a row in <60s
+- `FAIL` — SQL error returned (see `tools/validation_results.md` for details)
+- `SLOW` — timed out at the 60s validation budget; correctness unverified
+- `SKIP-MULTI` — multi-statement notebook, not run by automated validator
+- `SKIP-EMPTY` — file is 0 bytes
+- `—` — not yet validated
+
+| Domain | Query | Purpose | Status |
+|---|---|---|---|
+| GL | `domains/gl/gl_posting_map.sql` | Unified VECA + VFIN posting detail | PASS |
+| GL | `domains/gl/gl_posting_map_enriched.sql` | Posting detail + account classification | PASS |
+| GL | `domains/gl/gl_posting_today.sql` | Daily posting audit | SKIP-MULTI |
+| GL | `domains/gl/trial_balance.sql` | Trial balance as-of date | PASS |
+| GL | `domains/gl/gl_balance_export.sql` | Period balance export | PASS |
+| GL | `domains/gl/chart_of_accounts.sql` | Chart of accounts + mapping checks | PASS |
+| Diagnostics | `domains/diagnostics/diagnose_veca_vfin_overlap.sql` | Data overlap diagnostics | SKIP-MULTI |
+| Diagnostics | `domains/diagnostics/diagnose_exchange_subscriptions.sql` | Exchange subscription diagnostics | SKIP-MULTI |
+| Diagnostics | `domains/diagnostics/diagnose_single_invoice_exchange_failure.sql` | Single invoice Exchange failure deep dive (VECA -> VFIN) | SKIP-MULTI |
+| Sales | `domains/sales/order_information/so_header_and_lines.sql` | Customer-order header + line detail | PASS |
+| Sales | `domains/sales/order_information/so_header_and_lines_open_orders.sql` | Open customer orders only (canonical filter) | PASS |
+| Sales | `domains/sales/order_information/so_fulfillment_risk.sql` | **Per SO line: blocking components + next supply that would unblock** | PASS |
+| Sales | `domains/sales/performance/customer_otd_scorecard.sql` | Customer on-time delivery scorecard | PASS |
+| Sales | `domains/sales/performance/customer_scorecard.sql` | Customer activity & performance | FAIL |
+| Sales | `domains/sales/performance/past_due_so_aging.sql` | Past-due SO aging buckets | PASS |
+| Sales | `domains/sales/performance/salesrep_performance_scorecard.sql` | Sales rep scorecard | PASS |
+| Sales | `domains/sales/performance/sales_trend_monthly.sql` | Monthly sales trend | FAIL |
+| Sales | `domains/sales/performance/demand_trend_monthly.sql` | **Per-part monthly velocity + T3/T6/T12 trend + Pareto ABC + seasonality** | PASS |
+| Inventory | `domains/inventory/part_information/planning_information.sql` | Part-level planning snapshot (on-hand, demand, MRP exceptions) | PASS |
+| Inventory | `domains/inventory/part_information/exceptions_report.sql` | Inventory exception analysis | PASS |
+| Inventory | `domains/inventory/part_information/inventory_vs_part_location_qty_mismatch.sql` | Reconcile inventory vs part-location qty | SKIP-EMPTY |
+| Inventory | `domains/inventory/part_information/stocking_policy_recommendations.sql` | **Recommended SS + ROP from demand × LT variability vs current setting** | PASS |
+| Production | `domains/production/performance/open_wo_list.sql` | **Full open-WO list (on-time + late) + WIP $ + priority** — feeds `reports/open_wo_list.rdl` | PASS |
+| Production | `domains/production/performance/open_wo_aging_and_wip.sql` | Open WO aging + WIP $ (preserved for reference; same row-set as `open_wo_list.sql`) | PASS |
+| Production | `domains/production/performance/wo_otd_and_cycle_time.sql` | WO on-time + cycle time | PASS |
+| Production | `domains/production/performance/labor_productivity_scorecard.sql` | Labor productivity | PASS |
+| Production | `domains/production/performance/operation_efficiency_by_resource.sql` | Resource utilization | PASS |
+| Production | `domains/production/performance/schedule_health_by_operation.sql` | Operation schedule health | PASS |
+| Production | `domains/production/performance/fg_completion_forecast.sql` | **Open WO finish-date forecast + SO peg + component readiness** | PASS |
+| Scheduling | `domains/scheduling/resource_capacity_load.sql` | **Per-resource weekly load vs capacity + bottleneck flag** | PASS |
+| Supply Chain | `domains/supply_chain/bom/recursive_bom_from_masters.sql` | Recursive BOM explosion (single top part) | PASS |
+| Supply Chain | `domains/supply_chain/bom/recursive_bom_all_active_parts.sql` | Recursive BOM explosion (all active sales parts) | PASS |
+| Supply Chain | `domains/supply_chain/bom/recursive_routing_from_masters.sql` | Recursive routing explosion (single top part) | PASS |
+| Supply Chain | `domains/supply_chain/bom/recursive_routing_all_active_parts.sql` | Recursive routing explosion (all active parts) | PASS |
+| Supply Chain | `domains/supply_chain/demand/total_demand_by_part.sql` | **Unified demand: SO backorder + master schedule + forecast** | PASS |
+| Supply Chain | `domains/supply_chain/demand/exploded_gross_demand.sql` | **BOM-exploded component-level gross demand by source** | PASS |
+| Supply Chain | `domains/supply_chain/planning/net_requirements_weekly.sql` | **Time-phased MRP grid (gross / receipts / projected / net)** | PASS |
+| Supply Chain | `domains/supply_chain/planning/purchasing_plan.sql` | **Recommended POs: vendor, lead time, expected price** | PASS |
+| Supply Chain | `domains/supply_chain/planning/build_priority_by_so.sql` | **Per-SO buildability + priority score (isolated)** | PASS |
+| Supply Chain | `domains/supply_chain/planning/shared_buildable_allocation.sql` | **Per-SO buildable AFTER priority allocation across competing SOs** | PASS |
+| Supply Chain | `domains/supply_chain/planning/purchasing_plan_by_buyer_summary.sql` | **Buyer × week roll-up: parts to order, $ to spend, past-due** | PASS |
+| Supply Chain | `domains/supply_chain/planning/make_plan_weekly.sql` | **Fabrication plan: WO release date + qty + component readiness** | PASS |
+| Supply Chain | `domains/supply_chain/planning/supplemental_supply.sql` | **Unified open-WO + open-PO supply + open WO requirements (signed) for snapshot netting** | PASS |
+| Supply Chain | `domains/supply_chain/planning/obsolete_check.sql` | E&O candidate check (planning side) | PASS |
+| Supply Chain | `domains/supply_chain/planning/obsolete_explainer.sql` | E&O candidate explainer (planning side) | PASS |
+| Supply Chain | `domains/supply_chain/purchasing/open_po_list.sql` | **Full open PO list (past-due + not-due) incl. service POs + priority** — feeds `reports/open_po_list.rdl` | PASS |
+| Supply Chain | `domains/supply_chain/purchasing/open_and_planned_supply_detail.sql` | Unified open PO + planned supply (UOM normalized) | PASS |
+| Supply Chain | `domains/supply_chain/purchasing/open_purchase_orders_uom_normalized.sql` | Open POs with UOM conversion | PASS |
+| Supply Chain | `domains/supply_chain/purchasing/part_cost_summary.sql` | Std vs weighted-avg vs last-PO cost | PASS |
+| Supply Chain | `domains/supply_chain/purchasing/purchase_price_history_yearly.sql` | Yearly PO receipt price history | PASS |
+| Supply Chain | `domains/supply_chain/performance/vendor_otd_scorecard.sql` | Vendor on-time delivery scorecard | PASS |
+| Supply Chain | `domains/supply_chain/performance/vendor_lead_time_history.sql` | **Actual lead time stats per (vendor, part); ERP-vs-reality gap** | PASS |
+| Supply Chain | `domains/supply_chain/performance/part_price_volatility.sql` | **Monthly price trend + MoM/YoY + trailing-12 volatility** | PASS |
+| Supply Chain | `domains/supply_chain/performance/vendor_scorecard_360.sql` | **Consolidated vendor 360 (spend + OTD + LT + price + risk)** | FAIL |
+| Supply Chain | `domains/supply_chain/performance/commodity_spend_rollup.sql` | **Spend by commodity: top vendors, HHI concentration, inflation flags** | PASS |
+| Supply Chain | `domains/supply_chain/performance/buyer_performance_scorecard.sql` | Buyer-level OTD, spend, quality | PASS |
+| Supply Chain | `domains/supply_chain/performance/past_due_po_aging.sql` | Past-due PO aging only (preserved for reference; broader version is `../purchasing/open_po_list.sql`) | PASS |
+| Supply Chain | `domains/supply_chain/performance/material_shortage_vs_open_demand.sql` | Component shortages tied to SO at risk | PASS |
+| Supply Chain | `domains/supply_chain/performance/eo_forecast_coverage_months.sql` | E&O forecast coverage months | PASS |
+| Supply Chain | `domains/supply_chain/E&O/historical_E&O_basis.sql` | Historical E&O cost basis | SKIP-MULTI |
+| Supply Chain | `domains/supply_chain/executive/waste_and_stagnation.sql` | **Waste report: stagnant, excess, dead, orphan WO, early PO** | FAIL |
+| Supply Chain | `domains/supply_chain/executive/executive_supply_chain_kpis.sql` | **Per-site CEO KPI snapshot (backlog/WIP/inventory/OTD/turns)** | FAIL |
+| Supply Chain | `domains/supply_chain/executive/component_uniqueness.sql` | **Per component: how many active FGs use it (variant / family / platform)** | PASS |
+| Supply Chain | `domains/supply_chain/executive/sku_complexity_scorecard.sql` | **Per SKU: T12 sales + batch/setup tax + variant-only inventory $** | PASS |
+| Supply Chain | `domains/supply_chain/executive/product_line_cost_to_serve.sql` | **Per product line: SKU mix, setup overhead, variation inventory $** | PASS |
+| Sales | `domains/sales/active_parts_pricelist.sql` | Active part pricelist for sales | PASS |
 
 ## Canonical Rules
 

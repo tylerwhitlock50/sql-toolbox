@@ -176,7 +176,7 @@ stagnant AS (
 -- ============================================================
 excess AS (
     SELECT
-        CAST('EXCESS_COVERAGE' AS nvarchar(40)),
+        CAST('EXCESS_COVERAGE' AS nvarchar(40)) AS CATEGORY,
         SITE_ID, PART_ID, DESCRIPTION,
         CAST(
             CASE WHEN MONTHS_OF_SUPPLY_ON_HAND IS NULL THEN ON_HAND_VALUE
@@ -185,16 +185,16 @@ excess AS (
                       * (MONTHS_OF_SUPPLY_ON_HAND - @ExcessMonths)
                       / MONTHS_OF_SUPPLY_ON_HAND
             END AS decimal(23,2)) AS DOLLAR_IMPACT,
-        CAST(NULL AS nvarchar(15)),
-        CAST(NULL AS smallint),
-        CAST(NULL AS date),
+        CAST(NULL AS nvarchar(15)) AS REF_ID,
+        CAST(NULL AS smallint)     AS REF_LINE,
+        CAST(NULL AS date)         AS REF_DATE,
         CONCAT(CAST(CAST(MONTHS_OF_SUPPLY_ON_HAND AS decimal(10,1)) AS nvarchar(20)),
                ' months (~',
                CAST(CAST(WEEKS_OF_SUPPLY_ON_HAND AS decimal(10,1)) AS nvarchar(20)),
                ' weeks) of supply on hand (threshold ',
                CAST(@ExcessMonths AS nvarchar(10)), ' months). T12 issues = ',
-               CAST(CAST(QTY_ISSUED_T12 AS decimal(15,2)) AS nvarchar(30))),
-        CAST('Reduce future buys; consider transfer or excess sale.' AS nvarchar(120)),
+               CAST(CAST(QTY_ISSUED_T12 AS decimal(15,2)) AS nvarchar(30))) AS DETAIL,
+        CAST('Reduce future buys; consider transfer or excess sale.' AS nvarchar(120)) AS SUGGESTED_ACTION,
         ABC_CODE, BUYER_USER_ID, PLANNER_USER_ID
     FROM part_snapshot
     WHERE MONTHS_OF_SUPPLY_ON_HAND > @ExcessMonths
@@ -206,18 +206,18 @@ excess AS (
 -- ============================================================
 dead AS (
     SELECT
-        CAST('DEAD_PURCHASED_PART' AS nvarchar(40)),
+        CAST('DEAD_PURCHASED_PART' AS nvarchar(40)) AS CATEGORY,
         SITE_ID, PART_ID, DESCRIPTION,
-        CAST(ON_HAND_VALUE AS decimal(23,2)),
-        CAST(NULL AS nvarchar(15)),
-        CAST(NULL AS smallint),
-        CAST(NULL AS date),
+        CAST(ON_HAND_VALUE AS decimal(23,2)) AS DOLLAR_IMPACT,
+        CAST(NULL AS nvarchar(15)) AS REF_ID,
+        CAST(NULL AS smallint)     AS REF_LINE,
+        CAST(NULL AS date)         AS REF_DATE,
         CONCAT('On-hand $',
                CAST(CAST(ON_HAND_VALUE AS decimal(15,0)) AS nvarchar(20)),
                '. Zero open SO demand, zero open WO requirement, no movement in ',
                CAST(ISNULL(MONTHS_SINCE_MOVE, 999) AS nvarchar(10)),
-               ' months.'),
-        CAST('Candidate for scrap, return, or sale-to-vendor.' AS nvarchar(120)),
+               ' months.') AS DETAIL,
+        CAST('Candidate for scrap, return, or sale-to-vendor.' AS nvarchar(120)) AS SUGGESTED_ACTION,
         ABC_CODE, BUYER_USER_ID, PLANNER_USER_ID
     FROM part_snapshot
     WHERE PURCHASED = 'Y'
@@ -243,7 +243,7 @@ wo_last_activity AS (
 ),
 orphan AS (
     SELECT
-        CAST('ORPHAN_WO' AS nvarchar(40)),
+        CAST('ORPHAN_WO' AS nvarchar(40)) AS CATEGORY,
         wo.SITE_ID,
         wo.PART_ID,
         psv.DESCRIPTION,
@@ -260,8 +260,8 @@ orphan AS (
                CONVERT(nvarchar(10), wo.CREATE_DATE, 23),
                '. Last activity: ',
                COALESCE(CONVERT(nvarchar(10), la.LAST_ACTIVITY, 23), 'NEVER'),
-               '. Status: ', wo.STATUS),
-        CAST('Close, cancel, or reschedule. Free up WIP.' AS nvarchar(120)),
+               '. Status: ', wo.STATUS) AS DETAIL,
+        CAST('Close, cancel, or reschedule. Free up WIP.' AS nvarchar(120)) AS SUGGESTED_ACTION,
         psv.ABC_CODE,
         CAST(NULL AS nvarchar(20))         AS BUYER_USER_ID,
         psv.PLANNER_USER_ID
@@ -335,7 +335,7 @@ earliest_demand AS (
 ),
 early AS (
     SELECT
-        CAST('EARLY_PO' AS nvarchar(40)),
+        CAST('EARLY_PO' AS nvarchar(40)) AS CATEGORY,
         po.SITE_ID,
         po.PART_ID,
         psv.DESCRIPTION,
@@ -349,8 +349,8 @@ early AS (
                COALESCE(CONVERT(nvarchar(10), ed.FIRST_DEMAND_DATE, 23), 'NONE'),
                ' (',
                CAST(DATEDIFF(day, po.RECV_DATE, ed.FIRST_DEMAND_DATE) AS nvarchar(10)),
-               ' days early).'),
-        CAST('Push back receipt date or release in waves.' AS nvarchar(120)),
+               ' days early).') AS DETAIL,
+        CAST('Push back receipt date or release in waves.' AS nvarchar(120)) AS SUGGESTED_ACTION,
         psv.ABC_CODE,
         psv.BUYER_USER_ID,
         psv.PLANNER_USER_ID
