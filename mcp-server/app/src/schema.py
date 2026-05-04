@@ -4,13 +4,26 @@ import csv
 from pathlib import Path
 from typing import Any
 
-SCHEMA_ROOT = Path(__file__).resolve().parents[3] / "database_scripts"
 DEFAULT_MAX_CHARS = 40_000
 MAX_CHARS = 120_000
 
 
+def _schema_root() -> Path:
+    current = Path(__file__).resolve()
+    mounted = current.parent / "database_scripts"
+    if mounted.is_dir():
+        return mounted
+
+    for parent in current.parents:
+        candidate = parent / "database_scripts"
+        if candidate.is_dir():
+            return candidate
+
+    return mounted
+
+
 def _safe_path(relative_path: str) -> Path:
-    root = SCHEMA_ROOT.resolve()
+    root = _schema_root().resolve()
     rel = Path(relative_path)
     if rel.is_absolute():
         raise ValueError("path must be relative to database_scripts")
@@ -44,11 +57,12 @@ def _cap_text(text: str, max_chars: int) -> dict[str, Any]:
 
 
 def browse_schema_docs() -> list[dict[str, str]]:
+    schema_root = _schema_root()
     docs: list[dict[str, str]] = []
-    for path in sorted(SCHEMA_ROOT.glob("*.md")):
-        docs.append({"path": path.relative_to(SCHEMA_ROOT).as_posix(), "name": path.name, "type": "schema_doc"})
-    for path in sorted(SCHEMA_ROOT.glob("active_tables*.csv")):
-        docs.append({"path": path.relative_to(SCHEMA_ROOT).as_posix(), "name": path.name, "type": "active_tables"})
+    for path in sorted(schema_root.glob("*.md")):
+        docs.append({"path": path.relative_to(schema_root).as_posix(), "name": path.name, "type": "schema_doc"})
+    for path in sorted(schema_root.glob("active_tables*.csv")):
+        docs.append({"path": path.relative_to(schema_root).as_posix(), "name": path.name, "type": "active_tables"})
     return docs
 
 
@@ -62,18 +76,19 @@ def read_schema_doc(path: str, max_chars: int = DEFAULT_MAX_CHARS) -> dict[str, 
 
 
 def browse_database_objects(database: str = "veca", search: str = "") -> list[dict[str, str]]:
+    schema_root = _schema_root()
     database_key = database.lower().strip()
     if database_key not in {"veca", "vfin", "lsa"}:
         raise ValueError("database must be one of: veca, vfin, lsa")
 
-    root = SCHEMA_ROOT / database_key
+    root = schema_root / database_key
     if not root.is_dir():
         return []
 
     search_key = search.lower().strip()
     rows: list[dict[str, str]] = []
     for path in sorted(root.rglob("*.sql")):
-        rel = path.relative_to(SCHEMA_ROOT).as_posix()
+        rel = path.relative_to(schema_root).as_posix()
         if search_key and search_key not in path.name.lower() and search_key not in rel.lower():
             continue
         kind = "view" if ".View." in path.name or path.parent.name == "useful_views" else "table"
@@ -91,11 +106,12 @@ def read_database_object(path: str, max_chars: int = DEFAULT_MAX_CHARS) -> dict[
 
 
 def read_active_tables(database: str = "veca", max_rows: int = 500) -> dict[str, Any]:
+    schema_root = _schema_root()
     database_key = database.lower().strip()
     if database_key == "veca":
-        path = SCHEMA_ROOT / "active_tables.csv"
+        path = schema_root / "active_tables.csv"
     elif database_key == "vfin":
-        path = SCHEMA_ROOT / "active_tables_vfin.csv"
+        path = schema_root / "active_tables_vfin.csv"
     else:
         raise ValueError("active table inventory exists for veca and vfin only")
 
@@ -109,7 +125,7 @@ def read_active_tables(database: str = "veca", max_rows: int = 500) -> dict[str,
         rows.append(dict(row))
 
     return {
-        "path": path.relative_to(SCHEMA_ROOT).as_posix(),
+        "path": path.relative_to(schema_root).as_posix(),
         "database": database_key,
         "columns": reader.fieldnames or [],
         "rows": rows,

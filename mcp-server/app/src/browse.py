@@ -10,7 +10,18 @@ from pathlib import Path
 from typing import Any
 
 MOUNTED_QUERIES_ROOT = Path(__file__).resolve().parent / "queries"
-REPO_QUERIES_ROOT = Path(__file__).resolve().parents[3] / "queries"
+
+
+def _repo_queries_root() -> Path:
+    """
+    Best-effort fallback for local, non-container execution.
+    """
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        candidate = parent / "queries"
+        if candidate.is_dir():
+            return candidate
+    return current.parent / "queries"
 
 
 def browse_queries() -> list[dict[str, Any]]:
@@ -22,7 +33,7 @@ def browse_queries() -> list[dict[str, Any]]:
         - ``path``: POSIX path relative to the queries root (e.g. ``domains/gl/trial_balance.sql``)
         - ``name``: file basename only
     """
-    root = MOUNTED_QUERIES_ROOT if MOUNTED_QUERIES_ROOT.is_dir() else REPO_QUERIES_ROOT
+    root = MOUNTED_QUERIES_ROOT if MOUNTED_QUERIES_ROOT.is_dir() else _repo_queries_root()
     if not root.is_dir():
         return []
 
@@ -47,7 +58,7 @@ def read_query(query_path: str) -> str:
         ValueError: If ``query_path`` is absolute or escapes the queries directory.
         FileNotFoundError: If the path does not exist or is not a file.
     """
-    query_root = MOUNTED_QUERIES_ROOT if MOUNTED_QUERIES_ROOT.is_dir() else REPO_QUERIES_ROOT
+    query_root = MOUNTED_QUERIES_ROOT if MOUNTED_QUERIES_ROOT.is_dir() else _repo_queries_root()
     root = query_root.resolve()
     rel = Path(query_path)
     if rel.is_absolute():

@@ -66,6 +66,7 @@ This folder is the source of truth for production-ready queries.
 | Supply Chain | `domains/supply_chain/planning/shared_buildable_allocation.sql` | **Per-SO buildable AFTER priority allocation across competing SOs** |
 | Supply Chain | `domains/supply_chain/planning/purchasing_plan_by_buyer_summary.sql` | **Buyer × week roll-up: parts to order, $ to spend, past-due** |
 | Supply Chain | `domains/supply_chain/planning/make_plan_weekly.sql` | **Fabrication plan: WO release date + qty + component readiness** |
+| Supply Chain | `domains/supply_chain/planning/supplemental_supply.sql` | **Unified open-WO + open-PO supply + open WO requirements (signed) for snapshot netting** |
 | Supply Chain | `domains/supply_chain/purchasing/open_po_list.sql` | **Full open PO list (past-due + not-due) incl. service POs + priority** — feeds `reports/open_po_list.rdl` |
 | Supply Chain | `domains/supply_chain/purchasing/open_and_planned_supply_detail.sql` | Unified open PO + planned supply (UOM normalized) |
 | Supply Chain | `domains/supply_chain/purchasing/open_purchase_orders_uom_normalized.sql` | Open POs with UOM conversion |

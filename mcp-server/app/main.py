@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from mcp.server.fastmcp import FastMCP
 
 from src.tools import (
@@ -13,7 +15,11 @@ from src.tools import (
     query_database,
 )
 
-mcp = FastMCP("sql-toolbox")
+mcp = FastMCP(
+    "sql-toolbox",
+    host=os.getenv("MCP_HOST", "0.0.0.0"),
+    port=int(os.getenv("MCP_PORT", "8000")),
+)
 
 
 @mcp.tool()
@@ -74,4 +80,7 @@ def active_tables(database: str = "veca", max_rows: int = 500) -> dict:
 
 
 if __name__ == "__main__":
-    mcp.run()
+    transport = os.getenv("MCP_TRANSPORT", "streamable-http")
+    print(f"Starting MCP server (transport={transport})...", flush=True)
+    mcp.run(transport=transport)
+    print("MCP server stopped.", flush=True)
