@@ -1,2 +1,4 @@
 .vs/
 .claude/
+mcp-server/.env
+mcp-server/app/.venv/

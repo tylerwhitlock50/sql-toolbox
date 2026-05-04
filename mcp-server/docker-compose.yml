@@ -1,0 +1,10 @@
+services:
+  mcp-server:
+    build:
+      context: ./app
+      dockerfile: dockerfile
+    env_file:
+      - .env
+    volumes:
+      - ../queries:/app/src/queries:ro
+    command: python main.py
