@@ -32,6 +32,7 @@ This folder is the source of truth for production-ready queries.
 | GL | `domains/gl/chart_of_accounts.sql` | Chart of accounts + mapping checks |
 | Diagnostics | `domains/diagnostics/diagnose_veca_vfin_overlap.sql` | Data overlap diagnostics |
 | Diagnostics | `domains/diagnostics/diagnose_exchange_subscriptions.sql` | Exchange subscription diagnostics |
+| Diagnostics | `domains/diagnostics/diagnose_single_invoice_exchange_failure.sql` | Single invoice Exchange failure deep dive (VECA -> VFIN) |
 | Sales | `domains/sales/order_information/so_header_and_lines.sql` | Customer-order header + line detail |
 | Sales | `domains/sales/order_information/so_header_and_lines_open_orders.sql` | Open customer orders only (canonical filter) |
 | Sales | `domains/sales/order_information/so_fulfillment_risk.sql` | **Per SO line: blocking components + next supply that would unblock** |
