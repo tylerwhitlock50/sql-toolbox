@@ -48,62 +48,134 @@ Notes:
         <DataSourceName>VECA</DataSourceName>
         <CommandText><![CDATA[
 ;WITH open_po AS (
-    SELECT p.SITE_ID, p.ID AS po_id, p.VENDOR_ID,
-           COALESCE(NULLIF(LTRIM(RTRIM(p.BUYER)), ''), '(unassigned)') AS buyer,
-           p.ORDER_DATE, pl.LINE_NO, pl.PART_ID, pl.SERVICE_ID, pl.PURCHASE_UM, pl.UNIT_PRICE AS po_unit_price,
-           COALESCE(pd.DEL_SCHED_LINE_NO, 0) AS del_sched_line_no,
-           COALESCE(pd.ORDER_QTY, pl.ORDER_QTY, 0) AS sched_order_qty,
-           COALESCE(pd.RECEIVED_QTY, 0) AS sched_received_qty,
-           COALESCE(pd.DESIRED_RECV_DATE, pl.DESIRED_RECV_DATE,
-                    p.PROMISE_DATE, p.DESIRED_RECV_DATE) AS target_recv_date
+    SELECT
+        p.SITE_ID,
+        p.ID AS po_id,
+        p.VENDOR_ID,
+        COALESCE(NULLIF(LTRIM(RTRIM(p.BUYER)), ''), '(unassigned)') AS buyer,
+        p.ORDER_DATE,
+        pl.LINE_NO,
+        pl.PART_ID,
+        pl.SERVICE_ID,
+        pl.PURCHASE_UM,
+        pl.UNIT_PRICE AS po_unit_price,
+        COALESCE(pd.DEL_SCHED_LINE_NO, 0) AS del_sched_line_no,
+
+        COALESCE(pd.ORDER_QTY, pl.ORDER_QTY, 0) AS sched_order_qty,
+
+CASE 
+    WHEN pd.PURC_ORDER_ID IS NULL 
+        THEN COALESCE(pl.TOTAL_RECEIVED_QTY, 0)
+    ELSE COALESCE(pd.RECEIVED_QTY, 0)
+END AS sched_received_qty,
+
+        COALESCE(
+            pd.DESIRED_RECV_DATE,
+            pl.DESIRED_RECV_DATE,
+            p.PROMISE_DATE,
+            p.DESIRED_RECV_DATE
+        ) AS target_recv_date
     FROM PURCHASE_ORDER p
-    INNER JOIN PURC_ORDER_LINE pl ON pl.PURC_ORDER_ID = p.ID
-    LEFT JOIN PURC_LINE_DEL pd ON pd.PURC_ORDER_ID = pl.PURC_ORDER_ID
-        AND pd.PURC_ORDER_LINE_NO = pl.LINE_NO
+    INNER JOIN PURC_ORDER_LINE pl
+        ON pl.PURC_ORDER_ID = p.ID
+    LEFT JOIN PURC_LINE_DEL pd
+        ON pd.PURC_ORDER_ID = pl.PURC_ORDER_ID
+       AND pd.PURC_ORDER_LINE_NO = pl.LINE_NO
     WHERE ISNULL(p.STATUS, '') NOT IN ('X','C')
       AND ISNULL(pl.LINE_STATUS, '') NOT IN ('X','C')
       AND (pl.PART_ID IS NOT NULL OR pl.SERVICE_ID IS NOT NULL)
-      AND (@Site IS NULL OR @Site='' OR p.SITE_ID = @Site)
+      AND (@Site IS NULL OR p.SITE_ID = @Site)
 ),
+
 open_qty AS (
-    SELECT o.*, (o.sched_order_qty - o.sched_received_qty) AS open_qty_purchase_um
-    FROM open_po o WHERE (o.sched_order_qty - o.sched_received_qty) > 0
+    SELECT
+        o.*,
+        (o.sched_order_qty - o.sched_received_qty) AS open_qty_purchase_um
+    FROM open_po o
+    WHERE (o.sched_order_qty - o.sched_received_qty) > 0
 ),
+
 sales_linked_parts AS (
-    SELECT DISTINCT col.SITE_ID, col.PART_ID
+    SELECT DISTINCT
+        col.SITE_ID,
+        col.PART_ID
     FROM CUST_ORDER_LINE col
-    INNER JOIN CUSTOMER_ORDER co ON co.ID = col.CUST_ORDER_ID
-    WHERE co.STATUS IN ('R', 'F') AND col.LINE_STATUS = 'A'
+    INNER JOIN CUSTOMER_ORDER co
+        ON co.ID = col.CUST_ORDER_ID
+    WHERE co.STATUS IN ('R', 'F')
+      AND col.LINE_STATUS = 'A'
       AND col.ORDER_QTY > col.TOTAL_SHIPPED_QTY
 ),
+
 aged AS (
-    SELECT o.*, DATEDIFF(day, o.target_recv_date, @AsOfDate) AS days_past_due,
-           CASE WHEN o.target_recv_date >= @AsOfDate THEN 'NOT_DUE'
-                WHEN DATEDIFF(day, o.target_recv_date, @AsOfDate) BETWEEN 1 AND 7 THEN '0-7'
-                WHEN DATEDIFF(day, o.target_recv_date, @AsOfDate) BETWEEN 8 AND 14 THEN '8-14'
-                WHEN DATEDIFF(day, o.target_recv_date, @AsOfDate) BETWEEN 15 AND 30 THEN '15-30'
-                WHEN DATEDIFF(day, o.target_recv_date, @AsOfDate) BETWEEN 31 AND 60 THEN '31-60'
-                ELSE '61+' END AS aging_bucket
+    SELECT
+        o.*,
+        DATEDIFF(day, o.target_recv_date, @AsOfDate) AS days_past_due,
+        CASE
+            WHEN o.target_recv_date >= @AsOfDate THEN 'NOT_DUE'
+            WHEN DATEDIFF(day, o.target_recv_date, @AsOfDate) BETWEEN 1 AND 7 THEN '0-7'
+            WHEN DATEDIFF(day, o.target_recv_date, @AsOfDate) BETWEEN 8 AND 14 THEN '8-14'
+            WHEN DATEDIFF(day, o.target_recv_date, @AsOfDate) BETWEEN 15 AND 30 THEN '15-30'
+            WHEN DATEDIFF(day, o.target_recv_date, @AsOfDate) BETWEEN 31 AND 60 THEN '31-60'
+            ELSE '61+'
+        END AS aging_bucket
     FROM open_qty o
 )
-SELECT a.SITE_ID, a.po_id, a.LINE_NO, a.buyer, a.VENDOR_ID,
-       v.NAME AS vendor_name, a.PART_ID, a.SERVICE_ID, psv.DESCRIPTION AS part_description,
-       a.ORDER_DATE, a.target_recv_date, a.days_past_due, a.aging_bucket,
-       a.PURCHASE_UM, a.sched_order_qty, a.sched_received_qty, a.open_qty_purchase_um,
-       a.po_unit_price, (a.open_qty_purchase_um * a.po_unit_price) AS open_value,
-       CASE WHEN slp.PART_ID IS NOT NULL THEN 1 ELSE 0 END AS is_on_open_sales_order,
-       CASE WHEN a.days_past_due > 0 AND slp.PART_ID IS NOT NULL THEN 'P1 - expedite, SO demand'
-            WHEN a.days_past_due > 0 THEN 'P2 - past due'
-            WHEN slp.PART_ID IS NOT NULL THEN 'P3 - due soon, SO demand'
-            ELSE 'P4 - normal' END AS priority
+
+SELECT
+    a.SITE_ID,
+    a.po_id,
+    a.LINE_NO,
+    a.del_sched_line_no,
+    a.buyer,
+    a.VENDOR_ID,
+    v.NAME AS vendor_name,
+    a.PART_ID,
+    a.SERVICE_ID,
+    psv.DESCRIPTION AS part_description,
+    psv.PRODUCT_CODE,
+    psv.COMMODITY_CODE,
+
+    a.ORDER_DATE,
+    a.target_recv_date,
+    a.days_past_due,
+    a.aging_bucket,
+
+    a.PURCHASE_UM,
+    a.sched_order_qty,
+    a.sched_received_qty,
+    a.open_qty_purchase_um,
+
+    a.po_unit_price,
+    (a.open_qty_purchase_um * a.po_unit_price) AS open_value,
+
+    CASE WHEN slp.PART_ID IS NOT NULL THEN 1 ELSE 0 END AS is_on_open_sales_order,
+
+    CASE
+        WHEN a.days_past_due > 0 AND slp.PART_ID IS NOT NULL THEN 'P1 - expedite, SO demand'
+        WHEN a.days_past_due > 0                              THEN 'P2 - past due'
+        WHEN slp.PART_ID IS NOT NULL                          THEN 'P3 - due soon, SO demand'
+        ELSE                                                       'P4 - normal'
+    END AS priority
 FROM aged a
-LEFT JOIN VENDOR v ON v.ID = a.VENDOR_ID
-LEFT JOIN PART_SITE_VIEW psv ON psv.SITE_ID = a.SITE_ID AND psv.PART_ID = a.PART_ID
-LEFT JOIN sales_linked_parts slp ON slp.SITE_ID = a.SITE_ID AND slp.PART_ID = a.PART_ID
-WHERE (@Buyer IS NULL OR @Buyer='' OR a.buyer = @Buyer)
+LEFT JOIN VENDOR v
+    ON v.ID = a.VENDOR_ID
+LEFT JOIN PART_SITE_VIEW psv
+    ON psv.SITE_ID = a.SITE_ID
+   AND psv.PART_ID = a.PART_ID
+LEFT JOIN sales_linked_parts slp
+    ON slp.SITE_ID = a.SITE_ID
+   AND slp.PART_ID = a.PART_ID
+--WHERE a.po_id = 'PO-35982'
 ORDER BY
-    CASE a.aging_bucket WHEN '61+' THEN 1 WHEN '31-60' THEN 2 WHEN '15-30' THEN 3
-        WHEN '8-14' THEN 4 WHEN '0-7' THEN 5 ELSE 6 END,
+    CASE a.aging_bucket
+        WHEN '61+'   THEN 1
+        WHEN '31-60' THEN 2
+        WHEN '15-30' THEN 3
+        WHEN '8-14'  THEN 4
+        WHEN '0-7'   THEN 5
+        ELSE              6
+    END,
     (a.open_qty_purchase_um * a.po_unit_price) DESC;
         ]]></CommandText>
         <QueryParameters>
